@@ -895,6 +895,63 @@ async fn soft_delete_hides_memory() {
 }
 
 #[tokio::test]
+async fn restore_after_soft_delete_creates_new_row() {
+    let h = require_harness!("del_restore");
+    let profile = h.profile.clone();
+
+    let first = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: profile.clone(),
+            content: "original content".into(),
+            idempotency_key: "reuse-key".into(),
+            event_time: None,
+            tags: None,
+            source: None,
+            metadata: None,
+            memory_type: None,
+            external_refs: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!first.idempotent_replay);
+
+    tools::delete::handle(
+        &h.pool,
+        DeleteArgs {
+            profile: profile.clone(),
+            id: first.id.to_string(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let second = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: profile.clone(),
+            content: "replacement content".into(),
+            idempotency_key: "reuse-key".into(),
+            event_time: None,
+            tags: None,
+            source: None,
+            metadata: None,
+            memory_type: None,
+            external_refs: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(!second.idempotent_replay, "should be a fresh store, not a replay");
+    assert_ne!(second.id, first.id, "new row should have a different id");
+    assert_eq!(second.content, "replacement content");
+}
+
+#[tokio::test]
 async fn delete_memory_not_found() {
     let h = require_harness!("del_miss");
 
