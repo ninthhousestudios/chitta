@@ -75,6 +75,8 @@ pub struct SearchHit {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
     pub memory_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_refs: Option<serde_json::Value>,
 }
 
 pub type SearchOutput = Envelope<SearchHit>;
@@ -169,6 +171,7 @@ pub async fn handle(
             content: if include_content { Some(hit.content) } else { None },
             metadata: if include_content { hit.metadata } else { None },
             memory_type: hit.memory_type,
+            external_refs: hit.external_refs,
         })
         .collect();
 
@@ -333,6 +336,7 @@ mod tests {
             content: None,
             metadata: None,
             memory_type: "memory".to_string(),
+            external_refs: None,
         }
     }
 

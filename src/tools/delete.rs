@@ -1,6 +1,7 @@
 //! `delete_memory` handler.
 //!
-//! Hard-delete a memory by profile + id. No soft-delete; the row is gone.
+//! Soft-delete a memory by setting `invalidated_at`. The row remains in the
+//! database but is excluded from all read paths.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

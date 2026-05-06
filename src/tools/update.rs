@@ -42,6 +42,9 @@ pub struct UpdateArgs {
     /// New memory type. Validates against allowed types.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_type: Option<String>,
+    /// New external references. Replaces existing refs entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_refs: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -57,6 +60,8 @@ pub struct UpdateOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
     pub memory_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_refs: Option<serde_json::Value>,
     pub re_embedded: bool,
 }
 
@@ -73,11 +78,11 @@ pub async fn handle(
     validate::profile(TOOL, &args.profile)?;
     let id = validate::parse_uuid(TOOL, "id", &args.id)?;
 
-    if args.content.is_none() && args.tags.is_none() && args.source.is_none() && args.metadata.is_none() && args.memory_type.is_none() {
+    if args.content.is_none() && args.tags.is_none() && args.source.is_none() && args.metadata.is_none() && args.memory_type.is_none() && args.external_refs.is_none() {
         return Err(ChittaError::InvalidArgument {
             tool: TOOL,
             argument: "fields".to_string(),
-            constraint: "at least one of content, tags, source, metadata, or memory_type must be provided".to_string(),
+            constraint: "at least one of content, tags, source, metadata, memory_type, or external_refs must be provided".to_string(),
             received: None,
             next_action: "Provide at least one field to update.".to_string(),
         });
@@ -115,6 +120,7 @@ pub async fn handle(
         args.metadata.as_ref(),
         sparse_embedding.as_ref(),
         args.memory_type.as_deref(),
+        args.external_refs.as_ref(),
     )
     .await?
     .ok_or_else(|| ChittaError::NotFound {
@@ -135,6 +141,7 @@ pub async fn handle(
         source: row.source,
         metadata: row.metadata,
         memory_type: row.memory_type,
+        external_refs: row.external_refs,
         re_embedded,
     })
 }

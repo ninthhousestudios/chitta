@@ -85,6 +85,7 @@ fn store_output_wire_keys() {
         source: Some("test".into()),
         metadata: Some(json!({"k": "v"})),
         memory_type: "memory".into(),
+        external_refs: None,
         idempotent_replay: false,
     };
     let v = serde_json::to_value(&out).unwrap();
@@ -108,6 +109,7 @@ fn get_output_wire_keys() {
         source: None,
         metadata: None,
         memory_type: "observation".into(),
+        external_refs: None,
     };
     let v = serde_json::to_value(&out).unwrap();
     assert_keys(&v, &["id", "profile", "content", "event_time", "record_time", "tags", "memory_type"]);
@@ -128,6 +130,7 @@ fn search_output_envelope_shape() {
         content: None,
         metadata: None,
         memory_type: "memory".into(),
+        external_refs: None,
     };
     let env: SearchOutput = Envelope::new(vec![hit], false, Some(1), 42);
     let v = serde_json::to_value(&env).unwrap();
@@ -354,6 +357,7 @@ fn update_output_wire_keys() {
         source: None,
         metadata: None,
         memory_type: "decision".into(),
+        external_refs: None,
         re_embedded: true,
     };
     let v = serde_json::to_value(&out).unwrap();
@@ -414,6 +418,7 @@ fn list_output_wire_keys() {
         tags: vec!["t".into()],
         source: None,
         memory_type: "memory".into(),
+        external_refs: None,
     };
     let out = ListOutput {
         memories: vec![item],

@@ -52,6 +52,8 @@ pub struct ListItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     pub memory_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_refs: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -96,6 +98,7 @@ pub async fn handle(pool: &PgPool, args: ListArgs) -> Result<ListOutput> {
             tags: row.tags,
             source: row.source,
             memory_type: row.memory_type,
+            external_refs: row.external_refs,
         })
         .collect();
 

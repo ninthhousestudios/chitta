@@ -221,6 +221,7 @@ async fn idempotent_replay_returns_same_row() {
         source: None,
         metadata: None,
         memory_type: None,
+    external_refs: None,
     };
 
     let first = tools::store::handle(&h.pool, h.embedder.clone(), args()).await.unwrap();
@@ -264,6 +265,7 @@ async fn verbatim_roundtrip_preserves_unicode_and_whitespace() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -328,6 +330,7 @@ async fn search_max_tokens_triggers_truncated_with_honest_total() {
                 source: None,
                 metadata: None,
                 memory_type: None,
+            external_refs: None,
             },
         )
         .await
@@ -378,6 +381,7 @@ async fn error_contract_invalid_event_time_populates_next_action() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -430,6 +434,7 @@ async fn search_snippet_is_verbatim_prefix() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -478,6 +483,7 @@ async fn profile_isolation_keeps_searches_scoped() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -524,6 +530,7 @@ async fn content_too_long_rejected_with_token_count() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -553,6 +560,7 @@ async fn concurrent_duplicate_writes_converge_on_one_row() {
         source: None,
         metadata: None,
         memory_type: None,
+    external_refs: None,
     };
 
     let (a, b) = tokio::join!(
@@ -596,6 +604,7 @@ async fn search_finds_stored_memory_by_semantic_similarity() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -646,6 +655,7 @@ async fn update_memory_content_reembeds() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -662,6 +672,7 @@ async fn update_memory_content_reembeds() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -696,6 +707,7 @@ async fn update_memory_tags_only_no_reembed() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -712,6 +724,7 @@ async fn update_memory_tags_only_no_reembed() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -738,6 +751,7 @@ async fn update_memory_not_found() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -764,6 +778,7 @@ async fn update_memory_requires_at_least_one_field() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -797,6 +812,7 @@ async fn delete_memory_removes_row() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -861,6 +877,7 @@ async fn list_recent_returns_time_ordered() {
                 source: None,
                 metadata: None,
                 memory_type: None,
+            external_refs: None,
             },
         )
         .await
@@ -904,6 +921,7 @@ async fn list_recent_respects_limit() {
                 source: None,
                 metadata: None,
                 memory_type: None,
+            external_refs: None,
             },
         )
         .await
@@ -938,6 +956,7 @@ async fn search_with_tag_filter_returns_only_matching() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -955,6 +974,7 @@ async fn search_with_tag_filter_returns_only_matching() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -1006,6 +1026,7 @@ async fn search_with_min_similarity_filters_low_scores() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -1055,6 +1076,7 @@ async fn truncated_false_when_all_results_fit() {
                 source: None,
                 metadata: None,
                 memory_type: None,
+            external_refs: None,
             },
         )
         .await
@@ -1105,6 +1127,7 @@ async fn get_memory_cross_profile_isolation() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await
@@ -1146,6 +1169,7 @@ async fn store_with_non_default_memory_type_roundtrips() {
             source: None,
             metadata: None,
             memory_type: Some("observation".into()),
+            external_refs: None,
         },
     )
     .await
@@ -1184,6 +1208,7 @@ async fn search_memory_types_filter_excludes_non_matching() {
                 source: None,
                 metadata: None,
                 memory_type: Some(mt.into()),
+                external_refs: None,
             },
         )
         .await
@@ -1231,6 +1256,7 @@ async fn invalid_memory_type_store_rejected() {
             source: None,
             metadata: None,
             memory_type: Some("bogus".into()),
+            external_refs: None,
         },
     )
     .await
@@ -1260,6 +1286,7 @@ async fn search_returns_score_and_similarity() {
             source: None,
             metadata: None,
             memory_type: None,
+        external_refs: None,
         },
     )
     .await

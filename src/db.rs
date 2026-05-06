@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::error::{ChittaError, Result};
 
-/// One row of `memories`. Mirrors the schema in `migrations/0001_init.sql`.
+/// One row of `memories`. Mirrors the schema across migrations 0001–0008.
 #[derive(Debug, Clone, FromRow)]
 pub struct MemoryRow {
     pub id: Uuid,
@@ -30,6 +30,8 @@ pub struct MemoryRow {
     pub metadata: Option<serde_json::Value>,
     pub sparse_embedding: Option<serde_json::Value>,
     pub memory_type: String,
+    pub external_refs: Option<serde_json::Value>,
+    pub invalidated_at: Option<DateTime<Utc>>,
 }
 
 /// One hit from an ANN search. `similarity` is the raw cosine score
@@ -48,6 +50,7 @@ pub struct SearchHit {
     pub score: f32,
     pub metadata: Option<serde_json::Value>,
     pub memory_type: String,
+    pub external_refs: Option<serde_json::Value>,
 }
 
 pub async fn connect(cfg: &Config) -> Result<PgPool> {
@@ -80,9 +83,9 @@ pub async fn insert_or_fetch_memory(
     let insert_result = sqlx::query_as::<_, MemoryRow>(
         r#"
         insert into memories
-            (id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        returning id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type
+            (id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type, external_refs)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        returning id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type, external_refs, invalidated_at
         "#,
     )
     .bind(new.id)
@@ -97,6 +100,7 @@ pub async fn insert_or_fetch_memory(
     .bind(&new.metadata)
     .bind(&new.sparse_embedding)
     .bind(&new.memory_type)
+    .bind(&new.external_refs)
     .fetch_one(pool)
     .await;
 
@@ -134,9 +138,10 @@ pub async fn find_by_idempotency_key(
 ) -> Result<Option<MemoryRow>> {
     let row = sqlx::query_as::<_, MemoryRow>(
         r#"
-        select id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type
+        select id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type, external_refs, invalidated_at
         from memories
         where profile = $1 and idempotency_key = $2
+          and invalidated_at is null
         "#,
     )
     .bind(profile)
@@ -153,9 +158,10 @@ pub async fn get_memory_by_id(
 ) -> Result<Option<MemoryRow>> {
     let row = sqlx::query_as::<_, MemoryRow>(
         r#"
-        select id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type
+        select id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type, external_refs, invalidated_at
         from memories
         where profile = $1 and id = $2
+          and invalidated_at is null
         "#,
     )
     .bind(profile)
@@ -182,6 +188,7 @@ pub async fn update_memory(
     metadata: Option<&serde_json::Value>,
     sparse_embedding: Option<&serde_json::Value>,
     memory_type: Option<&str>,
+    external_refs: Option<&serde_json::Value>,
 ) -> Result<Option<MemoryRow>> {
     let row = sqlx::query_as::<_, MemoryRow>(
         r#"
@@ -192,9 +199,11 @@ pub async fn update_memory(
             source           = COALESCE($6, source),
             metadata         = COALESCE($7, metadata),
             sparse_embedding = COALESCE($8, sparse_embedding),
-            memory_type      = COALESCE($9, memory_type)
+            memory_type      = COALESCE($9, memory_type),
+            external_refs    = COALESCE($10, external_refs)
         WHERE profile = $1 AND id = $2
-        RETURNING id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type
+          AND invalidated_at IS NULL
+        RETURNING id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type, external_refs, invalidated_at
         "#,
     )
     .bind(profile)
@@ -206,17 +215,21 @@ pub async fn update_memory(
     .bind(metadata)
     .bind(sparse_embedding)
     .bind(memory_type)
+    .bind(external_refs)
     .fetch_optional(pool)
     .await?;
     Ok(row)
 }
 
-/// Hard-delete a memory by profile + id. Returns `true` if a row was deleted.
+/// Soft-delete a memory by setting `invalidated_at`. Returns `true` if a
+/// row was invalidated. Already-invalidated rows are not matched.
 pub async fn delete_memory(pool: &PgPool, profile: &str, id: Uuid) -> Result<bool> {
     let result = sqlx::query(
         r#"
-        DELETE FROM memories
+        UPDATE memories
+        SET invalidated_at = now()
         WHERE profile = $1 AND id = $2
+          AND invalidated_at IS NULL
         "#,
     )
     .bind(profile)
@@ -237,9 +250,10 @@ pub async fn list_recent(
 ) -> Result<Vec<MemoryRow>> {
     let rows = sqlx::query_as::<_, MemoryRow>(
         r#"
-        SELECT id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type
+        SELECT id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type, external_refs, invalidated_at
         FROM memories
         WHERE profile = $1
+          AND invalidated_at IS NULL
           AND ($3::text[] = '{}' OR tags && $3)
           AND ($4::text[] = '{}' OR memory_type = ANY($4))
         ORDER BY record_time DESC
@@ -259,7 +273,7 @@ pub async fn list_recent(
 pub async fn count_profile(pool: &PgPool, profile: &str) -> Result<i64> {
     let count: i64 = sqlx::query_scalar(
         r#"
-        SELECT count(*)::bigint FROM memories WHERE profile = $1
+        SELECT count(*)::bigint FROM memories WHERE profile = $1 AND invalidated_at IS NULL
         "#,
     )
     .bind(profile)
@@ -280,9 +294,10 @@ pub async fn list_recent_with_count(
 
     let rows = sqlx::query_as::<_, MemoryRow>(
         r#"
-        SELECT id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type
+        SELECT id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type, external_refs, invalidated_at
         FROM memories
         WHERE profile = $1
+          AND invalidated_at IS NULL
           AND ($3::text[] = '{}' OR tags && $3)
           AND ($4::text[] = '{}' OR memory_type = ANY($4))
         ORDER BY record_time DESC
@@ -300,6 +315,7 @@ pub async fn list_recent_with_count(
         r#"
         SELECT count(*)::bigint FROM memories
         WHERE profile = $1
+          AND invalidated_at IS NULL
           AND ($2::text[] = '{}' OR tags && $2)
           AND ($3::text[] = '{}' OR memory_type = ANY($3))
         "#,
@@ -364,6 +380,7 @@ pub async fn search_by_embedding(
         select count(*)::bigint
         from memories
         where profile = $1
+          and invalidated_at is null
           and ($2::text[] = '{}' or tags && $2)
           and ($3::text[] = '{}' or memory_type = ANY($3))
         "#,
@@ -397,9 +414,11 @@ pub async fn search_by_embedding(
             source,
             (1.0 - (embedding <=> $2))::real as similarity,
             metadata,
-            memory_type
+            memory_type,
+            external_refs
         from memories
         where profile = $1
+          and invalidated_at is null
           and ($3::text[] = '{}' or tags && $3)
           and ($6::text[] = '{}' or memory_type = ANY($6))
           and (1.0 - (embedding <=> $2))::real >= $4
@@ -453,6 +472,7 @@ pub async fn search_by_fts(
         SELECT id
         FROM memories
         WHERE profile = $1
+          AND invalidated_at IS NULL
           AND content_tsvector @@ plainto_tsquery('english', $2)
           AND ($4::text[] = '{}' OR tags && $4)
           AND ($5::text[] = '{}' OR memory_type = ANY($5))
@@ -512,9 +532,10 @@ pub async fn fetch_search_hits_by_ids(
     let rows = sqlx::query_as::<_, SearchHit>(
         r#"
         SELECT id, content, event_time, record_time, tags, source,
-               1.0::real AS similarity, metadata, memory_type
+               1.0::real AS similarity, metadata, memory_type, external_refs
         FROM memories
         WHERE profile = $1
+          AND invalidated_at IS NULL
           AND id = ANY($2)
         "#,
     )
@@ -613,4 +634,72 @@ pub async fn insert_query_log(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+// ── derivations (migration 0009) ────────────────────────────────────
+
+#[derive(Debug, Clone, FromRow)]
+pub struct DerivationRow {
+    pub id: Uuid,
+    pub derived_id: Uuid,
+    pub source_id: Uuid,
+    pub derivation_type: String,
+    pub created_at: DateTime<Utc>,
+}
+
+pub async fn insert_derivation(
+    pool: &PgPool,
+    derived_id: Uuid,
+    source_id: Uuid,
+    derivation_type: &str,
+) -> Result<DerivationRow> {
+    let row = sqlx::query_as::<_, DerivationRow>(
+        r#"
+        INSERT INTO derivations (derived_id, source_id, derivation_type)
+        VALUES ($1, $2, $3)
+        RETURNING id, derived_id, source_id, derivation_type, created_at
+        "#,
+    )
+    .bind(derived_id)
+    .bind(source_id)
+    .bind(derivation_type)
+    .fetch_one(pool)
+    .await?;
+    Ok(row)
+}
+
+pub async fn get_derivations_for(
+    pool: &PgPool,
+    derived_id: Uuid,
+) -> Result<Vec<DerivationRow>> {
+    let rows = sqlx::query_as::<_, DerivationRow>(
+        r#"
+        SELECT id, derived_id, source_id, derivation_type, created_at
+        FROM derivations
+        WHERE derived_id = $1
+        ORDER BY created_at
+        "#,
+    )
+    .bind(derived_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+pub async fn get_derived_from(
+    pool: &PgPool,
+    source_id: Uuid,
+) -> Result<Vec<DerivationRow>> {
+    let rows = sqlx::query_as::<_, DerivationRow>(
+        r#"
+        SELECT id, derived_id, source_id, derivation_type, created_at
+        FROM derivations
+        WHERE source_id = $1
+        ORDER BY created_at
+        "#,
+    )
+    .bind(source_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
 }

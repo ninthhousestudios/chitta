@@ -47,6 +47,10 @@ pub struct StoreArgs {
     /// Valid: memory, observation, decision, session_summary, mental_model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_type: Option<String>,
+    /// External references. JSON array of `{"kind": "<type>", "ref": "<value>"}`.
+    /// Kinds: file, commit, yojana_task, memory, url, session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_refs: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -62,6 +66,8 @@ pub struct StoreOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
     pub memory_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_refs: Option<serde_json::Value>,
     pub idempotent_replay: bool,
 }
 
@@ -124,6 +130,8 @@ pub async fn handle(
         metadata: args.metadata,
         sparse_embedding,
         memory_type,
+        external_refs: args.external_refs,
+        invalidated_at: None,
     };
 
     let (stored, replayed) = db::insert_or_fetch_memory(pool, &row).await?;
@@ -141,6 +149,7 @@ fn row_to_output(row: MemoryRow, replayed: bool) -> StoreOutput {
         source: row.source,
         metadata: row.metadata,
         memory_type: row.memory_type,
+        external_refs: row.external_refs,
         idempotent_replay: replayed,
     }
 }
