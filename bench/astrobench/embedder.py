@@ -12,7 +12,7 @@ from tokenizers import Tokenizer
 
 EMBEDDING_DIM = 1024
 MAX_TOKENS = 8192
-DEFAULT_MODEL_DIR = Path.home() / ".cache" / "chitta" / "bge-m3-onnx"
+DEFAULT_MODEL_DIR = Path.home() / ".chitta" / "models" / "bge-m3-onnx"
 DEFAULT_SPARSE_THRESHOLD = 0.01
 
 
@@ -85,7 +85,8 @@ class Embedder:
         output_names = [o.name for o in self.session.get_outputs()]
         results = dict(zip(output_names, outputs))
 
-        dense = results["dense_embeddings"].flatten().tolist()
+        dense_key = "dense_embeddings" if "dense_embeddings" in results else "sentence_embedding"
+        dense = results[dense_key].flatten().tolist()
         assert len(dense) == EMBEDDING_DIM, (
             f"expected {EMBEDDING_DIM}-dim, got {len(dense)}"
         )

@@ -15,6 +15,7 @@ Usage:
         --vault ~/vault \
         --chunk-size 512 --chunk-overlap 64
 """
+from __future__ import annotations
 
 import argparse
 import hashlib
@@ -28,7 +29,9 @@ from pathlib import Path
 import psycopg
 from pgvector.psycopg import register_vector
 
-from embedder import Embedder
+def _load_bge_embedder():
+    from embedder import Embedder
+    return Embedder
 
 PROFILES = {
     "astro": "astro",
@@ -192,7 +195,10 @@ def main():
     p = argparse.ArgumentParser(description="Ingest vault markdown into chitta_astrobench")
     p.add_argument("--db", default=DEFAULT_DB_URL, help="Postgres connection URL")
     p.add_argument("--vault", default=str(Path.home() / "vault"), help="Vault root directory")
-    p.add_argument("--model-dir", default=str(Path.home() / ".cache" / "chitta" / "bge-m3-onnx"))
+    p.add_argument("--model-dir", default=None,
+                   help="Model directory (auto-selected per embedder if omitted)")
+    p.add_argument("--embedder", choices=["bge", "qwen"], default="bge",
+                   help="Which embedder to use (default: bge)")
     p.add_argument("--chunk-size", type=int, default=512)
     p.add_argument("--chunk-overlap", type=int, default=64)
     p.add_argument("--profiles", nargs="+", default=list(PROFILES.keys()),
@@ -208,15 +214,26 @@ def main():
     print("=== astrobench ingest ===")
     print(f"  db: {args.db}")
     print(f"  vault: {vault}")
+    print(f"  embedder: {args.embedder}")
     print(f"  chunk: {args.chunk_size} tokens, {args.chunk_overlap} overlap")
     print(f"  profiles: {args.profiles}")
 
-    print("\nLoading BGE-M3 embedder ...")
-    t0 = time.perf_counter()
-    embedder = Embedder(
-        model_dir=Path(args.model_dir),
-        sparse_threshold=args.sparse_threshold,
-    )
+    if args.embedder == "qwen":
+        from embedder_qwen import Embedder as QwenEmbedder, DEFAULT_MODEL_DIR as QWEN_DEFAULT
+        model_dir = Path(args.model_dir) if args.model_dir else QWEN_DEFAULT
+        print(f"\nLoading Qwen3-VL-Embedding-2B embedder from {model_dir} ...")
+        t0 = time.perf_counter()
+        embedder = QwenEmbedder(model_dir=model_dir)
+    else:
+        BGEEmbedder = _load_bge_embedder()
+        from embedder import DEFAULT_MODEL_DIR as BGE_DEFAULT
+        model_dir = Path(args.model_dir) if args.model_dir else BGE_DEFAULT
+        print(f"\nLoading BGE-M3 embedder from {model_dir} ...")
+        t0 = time.perf_counter()
+        embedder = BGEEmbedder(
+            model_dir=model_dir,
+            sparse_threshold=args.sparse_threshold,
+        )
     print(f"  loaded in {time.perf_counter() - t0:.1f}s")
 
     conn = psycopg.connect(args.db, autocommit=False)

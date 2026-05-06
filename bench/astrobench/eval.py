@@ -14,6 +14,7 @@ Usage:
     # sweep all three
     uv run python eval.py --sweep
 """
+from __future__ import annotations
 
 import argparse
 import json
@@ -25,7 +26,9 @@ from pathlib import Path
 import psycopg
 from pgvector.psycopg import register_vector
 
-from embedder import Embedder
+def _load_bge_embedder():
+    from embedder import Embedder
+    return Embedder
 
 DEFAULT_DB_URL = "postgresql://josh:ogham@localhost/chitta_astrobench"
 QUERY_DIR = Path(__file__).resolve().parent.parent / "datasets" / "astrobench" / "queries"
@@ -199,6 +202,25 @@ def retrieve(
     return ranked, latency
 
 
+def build_source_index(
+    conn: psycopg.Connection,
+    profile: str,
+) -> tuple[dict[str, str], dict[str, set[str]]]:
+    """Build UUID→source_path and source_path→{UUIDs} mappings."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id::text, metadata->>'source_path' FROM memories WHERE profile = %s",
+            (profile,),
+        )
+        id_to_source: dict[str, str] = {}
+        source_to_ids: dict[str, set[str]] = defaultdict(set)
+        for row_id, source_path in cur.fetchall():
+            id_to_source[row_id] = source_path or ""
+            if source_path:
+                source_to_ids[source_path].add(row_id)
+    return id_to_source, dict(source_to_ids)
+
+
 def evaluate_query(
     conn: psycopg.Connection,
     embedder: Embedder,
@@ -206,30 +228,55 @@ def evaluate_query(
     profile: str,
     k_values: list[int],
     config: dict,
+    id_to_source: dict[str, str] | None = None,
 ) -> dict:
     max_k = max(k_values)
     results, latency = retrieve(conn, embedder, profile, query["query"], max_k, config)
 
     retrieved_ids = [doc_id for doc_id, _score in results]
-    gold_set = set(query["gold_chunk_ids"])
+    gold_ids = query["gold_chunk_ids"]
 
-    metrics = {"retrieve_ms": round(latency, 1)}
-    for k in k_values:
-        top_k = set(retrieved_ids[:k])
-        matched = gold_set & top_k
-        recall = len(matched) / len(gold_set) if gold_set else 0.0
-        metrics[f"recall@{k}"] = round(recall, 4)
+    # Detect whether gold IDs are source_paths (contain '/') or UUIDs
+    uses_paths = any("/" in g for g in gold_ids)
 
-    # MRR
-    mrr = 0.0
-    for rank, doc_id in enumerate(retrieved_ids, 1):
-        if doc_id in gold_set:
-            mrr = 1.0 / rank
-            break
-    metrics["mrr"] = round(mrr, 4)
+    if uses_paths and id_to_source:
+        # File-level matching: map retrieved UUIDs to source_paths
+        retrieved_sources = [id_to_source.get(rid, "") for rid in retrieved_ids]
 
-    # Hit rate (any gold in top max_k)
-    metrics["hit"] = 1.0 if gold_set & set(retrieved_ids) else 0.0
+        gold_sources = set(gold_ids)
+        metrics = {"retrieve_ms": round(latency, 1)}
+        for k in k_values:
+            top_k_sources = set(retrieved_sources[:k])
+            matched = gold_sources & top_k_sources
+            recall = len(matched) / len(gold_sources) if gold_sources else 0.0
+            metrics[f"recall@{k}"] = round(recall, 4)
+
+        mrr = 0.0
+        for rank, src in enumerate(retrieved_sources, 1):
+            if src in gold_sources:
+                mrr = 1.0 / rank
+                break
+        metrics["mrr"] = round(mrr, 4)
+
+        metrics["hit"] = 1.0 if gold_sources & set(retrieved_sources) else 0.0
+    else:
+        # Direct UUID matching (original behavior)
+        gold_set = set(gold_ids)
+        metrics = {"retrieve_ms": round(latency, 1)}
+        for k in k_values:
+            top_k = set(retrieved_ids[:k])
+            matched = gold_set & top_k
+            recall = len(matched) / len(gold_set) if gold_set else 0.0
+            metrics[f"recall@{k}"] = round(recall, 4)
+
+        mrr = 0.0
+        for rank, doc_id in enumerate(retrieved_ids, 1):
+            if doc_id in gold_set:
+                mrr = 1.0 / rank
+                break
+        metrics["mrr"] = round(mrr, 4)
+
+        metrics["hit"] = 1.0 if gold_set & set(retrieved_ids) else 0.0
 
     return {
         "query_id": query["id"],
@@ -249,11 +296,12 @@ def run_eval(
     k_values: list[int],
     config: dict,
     config_name: str,
+    id_to_source: dict[str, str] | None = None,
 ) -> dict:
     results = []
     total = len(queries)
     for i, q in enumerate(queries):
-        results.append(evaluate_query(conn, embedder, q, profile, k_values, config))
+        results.append(evaluate_query(conn, embedder, q, profile, k_values, config, id_to_source))
         if (i + 1) % 10 == 0 or i + 1 == total:
             print(f"  {i + 1}/{total} queries evaluated")
 
@@ -361,7 +409,10 @@ def main():
                    help="Run all three configs")
     p.add_argument("--k", nargs="+", type=int, default=[5, 10, 20],
                    help="k values for recall@k")
-    p.add_argument("--model-dir", default=str(Path.home() / ".cache" / "chitta" / "bge-m3-onnx"))
+    p.add_argument("--model-dir", default=None,
+                   help="Model directory (auto-selected per embedder if omitted)")
+    p.add_argument("--embedder", choices=["bge", "qwen"], default="bge",
+                   help="Which embedder to use (default: bge)")
     p.add_argument("--output-dir", "-o", default="outputs")
     args = p.parse_args()
 
@@ -379,13 +430,27 @@ def main():
 
     configs_to_run = list(CONFIGS.keys()) if args.sweep else [args.config]
 
-    print("Loading BGE-M3 embedder ...")
-    t0 = time.perf_counter()
-    embedder = Embedder(model_dir=Path(args.model_dir))
+    if args.embedder == "qwen":
+        from embedder_qwen import Embedder as QwenEmbedder, DEFAULT_MODEL_DIR as QWEN_DEFAULT
+        model_dir = Path(args.model_dir) if args.model_dir else QWEN_DEFAULT
+        print(f"Loading Qwen3-VL-Embedding-2B embedder from {model_dir} ...")
+        t0 = time.perf_counter()
+        embedder = QwenEmbedder(model_dir=model_dir)
+    else:
+        BGEEmbedder = _load_bge_embedder()
+        from embedder import DEFAULT_MODEL_DIR as BGE_DEFAULT
+        model_dir = Path(args.model_dir) if args.model_dir else BGE_DEFAULT
+        print(f"Loading BGE-M3 embedder from {model_dir} ...")
+        t0 = time.perf_counter()
+        embedder = BGEEmbedder(model_dir=model_dir)
     print(f"  loaded in {time.perf_counter() - t0:.1f}s")
 
     conn = psycopg.connect(args.db, autocommit=False)
     register_vector(conn)
+
+    print("Building source index ...")
+    id_to_source, _source_to_ids = build_source_index(conn, args.profile)
+    print(f"  indexed {len(id_to_source)} chunks")
 
     for config_name in configs_to_run:
         config = CONFIGS[config_name]
@@ -393,6 +458,7 @@ def main():
 
         summary = run_eval(
             conn, embedder, queries, args.profile, args.k, config, config_name,
+            id_to_source=id_to_source,
         )
         print_report(summary)
         save_results(summary, Path(args.output_dir))

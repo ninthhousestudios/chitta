@@ -94,7 +94,7 @@ def find_unique_tokens(
     print("-" * 160)
 
     for tok, (chunk_id, source_path, context) in sorted_hapax:
-        print(f"{tok:40s}  {chunk_id:36s}  {source_path:30s}  ...{context}...")
+        print(f"{tok:40s}  {str(chunk_id):36s}  {source_path:30s}  ...{context}...")
 
     # Also write to a file for easier browsing
     out_path = Path("hapax-candidates.txt")
@@ -103,7 +103,7 @@ def find_unique_tokens(
         f.write(f"# Tokens appearing in exactly one chunk, >= {min_length} chars\n")
         f.write(f"# Format: TOKEN | CHUNK_ID | SOURCE | CONTEXT\n\n")
         for tok, (chunk_id, source_path, context) in sorted_hapax:
-            f.write(f"{tok} | {chunk_id} | {source_path} | ...{context}...\n")
+            f.write(f"{tok} | {str(chunk_id)} | {source_path} | ...{context}...\n")
 
     print(f"\nFull list written to {out_path}")
 

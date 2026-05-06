@@ -14,3 +14,4 @@ bench/astrobench/outputs/
 bench/astrobench/hapax-candidates.txt
 bench/datasets/astrobench/snapshot-*.dump
 .sutra/
+.codex
