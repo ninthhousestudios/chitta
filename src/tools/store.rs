@@ -92,6 +92,9 @@ pub async fn handle(
     validate::tags(TOOL, &tags)?;
     let memory_type = args.memory_type.unwrap_or_else(|| "memory".to_string());
     validate::memory_type(TOOL, &memory_type)?;
+    if let Some(ref refs) = args.external_refs {
+        validate::external_refs(TOOL, refs)?;
+    }
 
     // Pre-flight SELECT: if the (profile, idempotency_key) pair already
     // exists, return the prior row immediately — no embed, no insert.

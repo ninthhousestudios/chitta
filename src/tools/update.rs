@@ -98,6 +98,9 @@ pub async fn handle(
     if let Some(ref mt) = args.memory_type {
         validate::memory_type(TOOL, mt)?;
     }
+    if let Some(ref refs) = args.external_refs {
+        validate::external_refs(TOOL, refs)?;
+    }
 
     // If content changed, re-embed (both dense and sparse).
     let (embedding, sparse_embedding, re_embedded) = if let Some(ref content) = args.content {

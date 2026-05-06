@@ -10,7 +10,7 @@ use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
-use chitta_rs::{config::{Config, chitta_home}, db, embedding::Embedder, mcp::ChittaServer};
+use chitta_rs::{config::{Config, chitta_home}, db, embedding::Embedder, ingest, mcp::ChittaServer};
 
 /// chitta: agent-native persistent memory MCP server.
 #[derive(Debug, Parser)]
@@ -401,9 +401,19 @@ async fn serve_http(
         },
     );
 
+    let (ingest_tx, ingest_rx) = tokio::sync::mpsc::channel::<ingest::IngestItem>(256);
+    let ingest_state = ingest::IngestState { tx: ingest_tx };
+
+    tokio::spawn(ingest::run_extraction_worker(
+        ingest_rx,
+        pool.clone(),
+        Arc::clone(&embedder),
+    ));
+
     #[allow(deprecated)]
     let app = axum::Router::new()
         .route("/mcp", any_service(mcp_service))
+        .route("/ingest", axum::routing::post(ingest::ingest_handler).with_state(ingest_state))
         .layer(normalize_accept)
         .layer(ValidateRequestHeaderLayer::bearer(&bearer_token));
 

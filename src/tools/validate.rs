@@ -217,6 +217,83 @@ pub fn memory_types(tool: &'static str, values: &[String]) -> Result<()> {
     Ok(())
 }
 
+pub const VALID_REF_KINDS: &[&str] =
+    &["file", "commit", "yojana_task", "memory", "url", "session"];
+
+/// External refs: JSON array of `{"kind": "<type>", "ref": "<value>"}`.
+pub fn external_refs(tool: &'static str, value: &serde_json::Value) -> Result<()> {
+    let arr = value.as_array().ok_or_else(|| ChittaError::InvalidArgument {
+        tool,
+        argument: "external_refs".to_string(),
+        constraint: "must be a JSON array".to_string(),
+        received: Some(json!({"type": value_type_name(value)})),
+        next_action: r#"Pass external_refs as an array: [{"kind": "file", "ref": "path/to/file"}]."#
+            .to_string(),
+    })?;
+    for (i, entry) in arr.iter().enumerate() {
+        let obj = entry.as_object().ok_or_else(|| ChittaError::InvalidArgument {
+            tool,
+            argument: "external_refs".to_string(),
+            constraint: "each element must be an object with \"kind\" and \"ref\" string fields"
+                .to_string(),
+            received: Some(json!({"index": i, "type": value_type_name(entry)})),
+            next_action: r#"Each element must be {"kind": "<type>", "ref": "<value>"}."#
+                .to_string(),
+        })?;
+        let kind = obj
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ChittaError::InvalidArgument {
+                tool,
+                argument: "external_refs".to_string(),
+                constraint: "each element must have a string \"kind\" field".to_string(),
+                received: Some(json!({"index": i})),
+                next_action: format!("Add a \"kind\" field. Valid kinds: {}", VALID_REF_KINDS.join(", ")),
+            })?;
+        if !VALID_REF_KINDS.contains(&kind) {
+            return Err(ChittaError::InvalidArgument {
+                tool,
+                argument: "external_refs".to_string(),
+                constraint: format!("kind must be one of: {}", VALID_REF_KINDS.join(", ")),
+                received: Some(json!({"index": i, "kind": kind})),
+                next_action: format!("Use a valid kind: {}", VALID_REF_KINDS.join(", ")),
+            });
+        }
+        let ref_val = obj
+            .get("ref")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ChittaError::InvalidArgument {
+                tool,
+                argument: "external_refs".to_string(),
+                constraint: "each element must have a non-empty string \"ref\" field".to_string(),
+                received: Some(json!({"index": i})),
+                next_action: r#"Add a "ref" field with the reference value (e.g. a file path, URL, or UUID)."#
+                    .to_string(),
+            })?;
+        if ref_val.is_empty() {
+            return Err(ChittaError::InvalidArgument {
+                tool,
+                argument: "external_refs".to_string(),
+                constraint: "\"ref\" must be non-empty".to_string(),
+                received: Some(json!({"index": i, "ref": ""})),
+                next_action: "Provide a non-empty ref value.".to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn value_type_name(v: &serde_json::Value) -> &'static str {
+    match v {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
 /// Parse a UUID argument, translating parse errors to a populated
 /// `InvalidArgument`.
 pub fn parse_uuid(tool: &'static str, argument: &'static str, value: &str) -> Result<Uuid> {
@@ -350,5 +427,43 @@ mod tests {
         assert!(memory_types("t", &["observation".into(), "decision".into()]).is_ok());
         assert!(memory_types("t", &["observation".into(), "bogus".into()]).is_err());
         assert!(memory_types("t", &[]).is_ok());
+    }
+
+    #[test]
+    fn external_refs_valid() {
+        let v = json!([{"kind": "file", "ref": "src/main.rs"}]);
+        assert!(external_refs("t", &v).is_ok());
+
+        let multi = json!([
+            {"kind": "file", "ref": "a.rs"},
+            {"kind": "commit", "ref": "abc123"},
+            {"kind": "url", "ref": "https://example.com"},
+        ]);
+        assert!(external_refs("t", &multi).is_ok());
+
+        assert!(external_refs("t", &json!([])).is_ok());
+    }
+
+    #[test]
+    fn external_refs_not_array() {
+        assert!(external_refs("t", &json!({"kind": "file", "ref": "x"})).is_err());
+        assert!(external_refs("t", &json!("string")).is_err());
+    }
+
+    #[test]
+    fn external_refs_bad_element() {
+        assert!(external_refs("t", &json!(["not an object"])).is_err());
+        assert!(external_refs("t", &json!([{"kind": "file"}])).is_err());
+        assert!(external_refs("t", &json!([{"ref": "x"}])).is_err());
+    }
+
+    #[test]
+    fn external_refs_invalid_kind() {
+        assert!(external_refs("t", &json!([{"kind": "bogus", "ref": "x"}])).is_err());
+    }
+
+    #[test]
+    fn external_refs_empty_ref() {
+        assert!(external_refs("t", &json!([{"kind": "file", "ref": ""}])).is_err());
     }
 }
