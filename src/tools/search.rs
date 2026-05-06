@@ -96,7 +96,16 @@ pub async fn handle(
     let search_start = std::time::Instant::now();
     // Destructure up front so we can move `query` into spawn_blocking
     // without cloning and still use the other fields afterward.
-    let SearchArgs { profile, query, k, max_tokens, tags, min_similarity, include_content, memory_types } = args;
+    let SearchArgs {
+        profile,
+        query,
+        k,
+        max_tokens,
+        tags,
+        min_similarity,
+        include_content,
+        memory_types,
+    } = args;
     let include_content = include_content.unwrap_or(false);
 
     validate::profile(TOOL, &profile)?;
@@ -135,15 +144,35 @@ pub async fn handle(
 
     let (hits, total_available) = if use_hybrid {
         crate::retrieval::search_hybrid(
-            pool, &profile, &embed_out, fetch_k, &tags, &memory_types,
-            search_cfg.recency_weight, search_cfg.recency_half_life_days,
-            search_cfg, &query,
-        ).await?
+            pool,
+            &crate::retrieval::HybridSearchParams {
+                profile: &profile,
+                query_embed: &embed_out,
+                k: fetch_k,
+                tags: &tags,
+                memory_types: &memory_types,
+                recency_weight: search_cfg.recency_weight,
+                recency_half_life_days: search_cfg.recency_half_life_days,
+                search_cfg,
+                query_text: &query,
+            },
+        )
+        .await?
     } else {
         db::search_by_embedding(
-            pool, &profile, &query_vec, fetch_k, &tags, &memory_types, min_similarity,
-            search_cfg.recency_weight, search_cfg.recency_half_life_days,
-        ).await?
+            pool,
+            &db::SearchParams {
+                profile: &profile,
+                query: &query_vec,
+                k: fetch_k,
+                tags: &tags,
+                memory_types: &memory_types,
+                min_similarity,
+                recency_weight: search_cfg.recency_weight,
+                recency_half_life_days: search_cfg.recency_half_life_days,
+            },
+        )
+        .await?
     };
 
     let hits = if let Some(ref field) = search_cfg.dedup_field {
@@ -168,7 +197,11 @@ pub async fn handle(
             record_time: hit.record_time,
             tags: hit.tags,
             source: hit.source,
-            content: if include_content { Some(hit.content) } else { None },
+            content: if include_content {
+                Some(hit.content)
+            } else {
+                None
+            },
             metadata: if include_content { hit.metadata } else { None },
             memory_type: hit.memory_type,
             external_refs: hit.external_refs,
@@ -208,18 +241,20 @@ pub async fn handle(
         tokio::spawn(async move {
             if let Err(e) = db::insert_query_log(
                 &log_pool,
-                &log_profile,
-                &log_query,
-                &log_embedding,
-                k,
-                min_similarity,
-                &log_tags,
-                &log_memory_types,
-                &result_ids,
-                &result_scores,
-                log_total,
-                log_truncated,
-                latency_ms,
+                &db::QueryLogInput {
+                    profile: &log_profile,
+                    query_text: &log_query,
+                    embedding: &log_embedding,
+                    k,
+                    min_similarity,
+                    tags: &log_tags,
+                    memory_types: &log_memory_types,
+                    result_ids: &result_ids,
+                    result_scores: &result_scores,
+                    total_available: log_total,
+                    truncated: log_truncated,
+                    latency_ms,
+                },
             )
             .await
             {
@@ -243,7 +278,7 @@ fn dedup_by_field(hits: Vec<db::SearchHit>, field: &str, k: usize) -> Vec<db::Se
             .as_ref()
             .and_then(|m| m.get(field))
             .and_then(|v| v.as_str())
-            .map_or(false, |key| !seen.insert(key.to_string()));
+            .is_some_and(|key| !seen.insert(key.to_string()));
         if !dominated {
             result.push(hit);
             if result.len() >= k {

@@ -56,9 +56,11 @@ impl ChittaServer {
 #[tool_router(router = tool_router)]
 impl ChittaServer {
     /// Store a new memory. Idempotent on (profile, idempotency_key).
-    #[tool(description = "Store a new memory. Idempotent on (profile, idempotency_key): \
+    #[tool(
+        description = "Store a new memory. Idempotent on (profile, idempotency_key): \
                           resubmitting the same key returns the prior row with \
-                          idempotent_replay=true.")]
+                          idempotent_replay=true."
+    )]
     pub async fn store_memory(
         &self,
         Parameters(args): Parameters<tools::StoreArgs>,
@@ -76,14 +78,18 @@ impl ChittaServer {
         &self,
         Parameters(args): Parameters<tools::GetArgs>,
     ) -> Result<String, ErrorData> {
-        let out = tools::get::handle(&self.pool, args).await.map_err(chitta_to_rmcp)?;
+        let out = tools::get::handle(&self.pool, args)
+            .await
+            .map_err(chitta_to_rmcp)?;
         serde_json::to_string_pretty(&out).map_err(json_to_rmcp)
     }
 
     /// Semantic similarity search. Returns envelope with snippets.
-    #[tool(description = "Semantic search. Returns an envelope with 200-char snippets, \
+    #[tool(
+        description = "Semantic search. Returns an envelope with 200-char snippets, \
                           similarity scores, and honest truncated/total_available. \
-                          Call get_memory(id) to read full content.")]
+                          Call get_memory(id) to read full content."
+    )]
     pub async fn search_memories(
         &self,
         Parameters(args): Parameters<tools::SearchArgs>,
@@ -101,10 +107,12 @@ impl ChittaServer {
     }
 
     /// Update a memory's content and/or tags.
-    #[tool(description = "Update a memory's content and/or tags by profile + id. \
+    #[tool(
+        description = "Update a memory's content and/or tags by profile + id. \
                           At least one of content or tags must be provided. \
                           If content changes, the embedding is recomputed. \
-                          record_time is never updated.")]
+                          record_time is never updated."
+    )]
     pub async fn update_memory(
         &self,
         Parameters(args): Parameters<tools::UpdateArgs>,
@@ -144,10 +152,12 @@ impl ChittaServer {
     }
 
     /// Health check — verifies DB connectivity and embedder responsiveness.
-    #[tool(description = "Health check. Verifies DB connectivity and ONNX embedder \
+    #[tool(
+        description = "Health check. Verifies DB connectivity and ONNX embedder \
                           responsiveness. Returns status (ok/degraded), component \
                           health flags, pool size, and server version. Call at \
-                          session start to confirm the server is operational.")]
+                          session start to confirm the server is operational."
+    )]
     pub async fn health_check(
         &self,
         Parameters(_args): Parameters<tools::HealthArgs>,
@@ -162,14 +172,13 @@ impl ChittaServer {
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for ChittaServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions(
-                "chitta v0.1.0 — agent-native persistent memory. \
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
+            "chitta v0.1.0 — agent-native persistent memory. \
                  Seven tools: store_memory, get_memory, search_memories, \
                  update_memory, delete_memory, list_recent_memories, health_check. \
                  Profiles isolate namespaces; idempotency_key dedupes writes; \
                  bi-temporal (event_time + record_time); verbatim storage.",
-            )
+        )
     }
 }
 

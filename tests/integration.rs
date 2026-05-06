@@ -28,9 +28,7 @@ use chitta_rs::config::{Config, SearchConfig};
 use chitta_rs::db;
 use chitta_rs::embedding::Embedder;
 use chitta_rs::error::ChittaError;
-use chitta_rs::tools::{
-    self, DeleteArgs, GetArgs, ListArgs, SearchArgs, StoreArgs, UpdateArgs,
-};
+use chitta_rs::tools::{self, DeleteArgs, GetArgs, ListArgs, SearchArgs, StoreArgs, UpdateArgs};
 use sqlx::PgPool;
 use tokio::sync::OnceCell;
 use uuid::Uuid;
@@ -110,7 +108,10 @@ async fn try_shared() -> Option<SharedSetup> {
     };
 
     if !cfg.model_file().is_file() || !cfg.tokenizer_file().is_file() {
-        eprintln!("SKIPPED: model or tokenizer missing at {:?}", cfg.model_path);
+        eprintln!(
+            "SKIPPED: model or tokenizer missing at {:?}",
+            cfg.model_path
+        );
         return None;
     }
 
@@ -137,7 +138,10 @@ async fn try_shared() -> Option<SharedSetup> {
         }
     };
 
-    Some(SharedSetup { database_url, embedder })
+    Some(SharedSetup {
+        database_url,
+        embedder,
+    })
 }
 
 async fn fresh_harness(name: &str) -> Option<Harness> {
@@ -173,7 +177,11 @@ async fn fresh_harness(name: &str) -> Option<Harness> {
             return None;
         }
     };
-    Some(Harness { pool, embedder: s.embedder, profile: unique_profile(name) })
+    Some(Harness {
+        pool,
+        embedder: s.embedder,
+        profile: unique_profile(name),
+    })
 }
 
 /// Unique profile per test so parallel tests (and reruns) don't collide.
@@ -221,14 +229,20 @@ async fn idempotent_replay_returns_same_row() {
         source: None,
         metadata: None,
         memory_type: None,
-    external_refs: None,
+        external_refs: None,
     };
 
-    let first = tools::store::handle(&h.pool, h.embedder.clone(), args()).await.unwrap();
+    let first = tools::store::handle(&h.pool, h.embedder.clone(), args())
+        .await
+        .unwrap();
     assert!(!first.idempotent_replay);
 
-    let second = tools::store::handle(&h.pool, h.embedder.clone(), args()).await.unwrap();
-    let third = tools::store::handle(&h.pool, h.embedder.clone(), args()).await.unwrap();
+    let second = tools::store::handle(&h.pool, h.embedder.clone(), args())
+        .await
+        .unwrap();
+    let third = tools::store::handle(&h.pool, h.embedder.clone(), args())
+        .await
+        .unwrap();
 
     assert!(second.idempotent_replay);
     assert!(third.idempotent_replay);
@@ -265,7 +279,7 @@ async fn verbatim_roundtrip_preserves_unicode_and_whitespace() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -273,12 +287,18 @@ async fn verbatim_roundtrip_preserves_unicode_and_whitespace() {
 
     let fetched = tools::get::handle(
         &h.pool,
-        GetArgs { profile: profile.clone(), id: stored.id.to_string() },
+        GetArgs {
+            profile: profile.clone(),
+            id: stored.id.to_string(),
+        },
     )
     .await
     .unwrap();
 
-    assert_eq!(fetched.content, content, "content must round-trip byte-for-byte");
+    assert_eq!(
+        fetched.content, content,
+        "content must round-trip byte-for-byte"
+    );
 }
 
 #[tokio::test]
@@ -307,7 +327,10 @@ async fn search_envelope_has_four_fields_on_empty_profile() {
     assert!(out.results.is_empty());
     assert!(!out.truncated);
     assert_eq!(out.total_available, Some(0));
-    assert!(out.budget_spent_tokens > 0, "envelope overhead must be counted");
+    assert!(
+        out.budget_spent_tokens > 0,
+        "envelope overhead must be counted"
+    );
 }
 
 #[tokio::test]
@@ -330,7 +353,7 @@ async fn search_max_tokens_triggers_truncated_with_honest_total() {
                 source: None,
                 metadata: None,
                 memory_type: None,
-            external_refs: None,
+                external_refs: None,
             },
         )
         .await
@@ -357,7 +380,10 @@ async fn search_max_tokens_triggers_truncated_with_honest_total() {
     .await
     .unwrap();
 
-    assert!(out.truncated, "expected truncated=true under tight max_tokens");
+    assert!(
+        out.truncated,
+        "expected truncated=true under tight max_tokens"
+    );
     assert_eq!(out.results.len(), 1, "apply_budget keeps at least one hit");
     assert!(
         out.total_available.unwrap() >= out.results.len() as u64,
@@ -376,12 +402,17 @@ async fn error_contract_invalid_event_time_populates_next_action() {
             profile: h.profile.clone(),
             content: "anything".into(),
             idempotency_key: "e-1".into(),
-            event_time: Some(chrono::Utc.with_ymd_and_hms(1969, 6, 20, 0, 0, 0).single().unwrap()),
+            event_time: Some(
+                chrono::Utc
+                    .with_ymd_and_hms(1969, 6, 20, 0, 0, 0)
+                    .single()
+                    .unwrap(),
+            ),
             tags: None,
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -401,7 +432,10 @@ async fn error_contract_not_found_points_at_search() {
 
     let err = tools::get::handle(
         &h.pool,
-        GetArgs { profile: h.profile.clone(), id: Uuid::now_v7().to_string() },
+        GetArgs {
+            profile: h.profile.clone(),
+            id: Uuid::now_v7().to_string(),
+        },
     )
     .await
     .unwrap_err();
@@ -434,7 +468,7 @@ async fn search_snippet_is_verbatim_prefix() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -462,7 +496,10 @@ async fn search_snippet_is_verbatim_prefix() {
     assert_eq!(out.results.len(), 1);
     let snippet = &out.results[0].snippet;
     assert_eq!(snippet.chars().count(), 200);
-    assert!(content.starts_with(snippet), "snippet must be a verbatim prefix");
+    assert!(
+        content.starts_with(snippet),
+        "snippet must be a verbatim prefix"
+    );
 }
 
 #[tokio::test]
@@ -483,7 +520,7 @@ async fn profile_isolation_keeps_searches_scoped() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -530,7 +567,7 @@ async fn content_too_long_rejected_with_token_count() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -560,7 +597,7 @@ async fn concurrent_duplicate_writes_converge_on_one_row() {
         source: None,
         metadata: None,
         memory_type: None,
-    external_refs: None,
+        external_refs: None,
     };
 
     let (a, b) = tokio::join!(
@@ -604,7 +641,7 @@ async fn search_finds_stored_memory_by_semantic_similarity() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -632,7 +669,11 @@ async fn search_finds_stored_memory_by_semantic_similarity() {
     assert!(!out.results.is_empty());
     let top = &out.results[0];
     assert_eq!(top.id, stored.id);
-    assert!(top.similarity > 0.5, "expected strong similarity, got {}", top.similarity);
+    assert!(
+        top.similarity > 0.5,
+        "expected strong similarity, got {}",
+        top.similarity
+    );
     assert!(top.tags.contains(&"db".to_string()));
 }
 
@@ -655,7 +696,7 @@ async fn update_memory_content_reembeds() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -672,7 +713,7 @@ async fn update_memory_content_reembeds() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -683,7 +724,10 @@ async fn update_memory_content_reembeds() {
 
     let fetched = tools::get::handle(
         &h.pool,
-        GetArgs { profile, id: stored.id.to_string() },
+        GetArgs {
+            profile,
+            id: stored.id.to_string(),
+        },
     )
     .await
     .unwrap();
@@ -707,7 +751,7 @@ async fn update_memory_tags_only_no_reembed() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -724,7 +768,7 @@ async fn update_memory_tags_only_no_reembed() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -733,7 +777,10 @@ async fn update_memory_tags_only_no_reembed() {
     assert_eq!(updated.id, stored.id);
     assert!(!updated.re_embedded, "tags-only update must not re-embed");
     assert_eq!(updated.content, "tags-only update test content");
-    assert_eq!(updated.tags, vec!["new-tag".to_string(), "another".to_string()]);
+    assert_eq!(
+        updated.tags,
+        vec!["new-tag".to_string(), "another".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -751,7 +798,7 @@ async fn update_memory_not_found() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -778,7 +825,7 @@ async fn update_memory_requires_at_least_one_field() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -796,7 +843,7 @@ async fn update_memory_requires_at_least_one_field() {
 }
 
 #[tokio::test]
-async fn delete_memory_removes_row() {
+async fn soft_delete_hides_memory() {
     let h = require_harness!("del_ok");
     let profile = h.profile.clone();
 
@@ -812,7 +859,7 @@ async fn delete_memory_removes_row() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -820,7 +867,10 @@ async fn delete_memory_removes_row() {
 
     let del = tools::delete::handle(
         &h.pool,
-        DeleteArgs { profile: profile.clone(), id: stored.id.to_string() },
+        DeleteArgs {
+            profile: profile.clone(),
+            id: stored.id.to_string(),
+        },
     )
     .await
     .unwrap();
@@ -830,7 +880,10 @@ async fn delete_memory_removes_row() {
     // get should now fail with NotFound.
     let err = tools::get::handle(
         &h.pool,
-        GetArgs { profile, id: stored.id.to_string() },
+        GetArgs {
+            profile,
+            id: stored.id.to_string(),
+        },
     )
     .await
     .unwrap_err();
@@ -847,7 +900,10 @@ async fn delete_memory_not_found() {
 
     let err = tools::delete::handle(
         &h.pool,
-        DeleteArgs { profile: h.profile.clone(), id: Uuid::now_v7().to_string() },
+        DeleteArgs {
+            profile: h.profile.clone(),
+            id: Uuid::now_v7().to_string(),
+        },
     )
     .await
     .unwrap_err();
@@ -877,7 +933,7 @@ async fn list_recent_returns_time_ordered() {
                 source: None,
                 metadata: None,
                 memory_type: None,
-            external_refs: None,
+                external_refs: None,
             },
         )
         .await
@@ -886,7 +942,12 @@ async fn list_recent_returns_time_ordered() {
 
     let out = tools::list::handle(
         &h.pool,
-        ListArgs { profile, limit: None, tags: None , memory_types: None },
+        ListArgs {
+            profile,
+            limit: None,
+            tags: None,
+            memory_types: None,
+        },
     )
     .await
     .unwrap();
@@ -921,7 +982,7 @@ async fn list_recent_respects_limit() {
                 source: None,
                 metadata: None,
                 memory_type: None,
-            external_refs: None,
+                external_refs: None,
             },
         )
         .await
@@ -930,13 +991,21 @@ async fn list_recent_respects_limit() {
 
     let out = tools::list::handle(
         &h.pool,
-        ListArgs { profile, limit: Some(2), tags: None , memory_types: None },
+        ListArgs {
+            profile,
+            limit: Some(2),
+            tags: None,
+            memory_types: None,
+        },
     )
     .await
     .unwrap();
 
     assert_eq!(out.memories.len(), 2, "limit=2 must return exactly 2");
-    assert!(out.total_in_profile >= 3, "total_in_profile must reflect all stored");
+    assert!(
+        out.total_in_profile >= 3,
+        "total_in_profile must reflect all stored"
+    );
 }
 
 #[tokio::test]
@@ -956,7 +1025,7 @@ async fn search_with_tag_filter_returns_only_matching() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -974,7 +1043,7 @@ async fn search_with_tag_filter_returns_only_matching() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -999,7 +1068,10 @@ async fn search_with_tag_filter_returns_only_matching() {
     .await
     .unwrap();
 
-    assert!(!out.results.is_empty(), "should find the rust-tagged memory");
+    assert!(
+        !out.results.is_empty(),
+        "should find the rust-tagged memory"
+    );
     for hit in &out.results {
         assert!(
             hit.tags.contains(&"rust".to_string()),
@@ -1026,7 +1098,7 @@ async fn search_with_min_similarity_filters_low_scores() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -1076,7 +1148,7 @@ async fn truncated_false_when_all_results_fit() {
                 source: None,
                 metadata: None,
                 memory_type: None,
-            external_refs: None,
+                external_refs: None,
             },
         )
         .await
@@ -1127,7 +1199,7 @@ async fn get_memory_cross_profile_isolation() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -1136,7 +1208,10 @@ async fn get_memory_cross_profile_isolation() {
     // Same UUID, different profile — must not find it.
     let err = tools::get::handle(
         &h.pool,
-        GetArgs { profile: profile_b, id: stored.id.to_string() },
+        GetArgs {
+            profile: profile_b,
+            id: stored.id.to_string(),
+        },
     )
     .await
     .unwrap_err();
@@ -1179,7 +1254,10 @@ async fn store_with_non_default_memory_type_roundtrips() {
 
     let fetched = tools::get::handle(
         &h.pool,
-        GetArgs { profile: h.profile.clone(), id: stored.id.to_string() },
+        GetArgs {
+            profile: h.profile.clone(),
+            id: stored.id.to_string(),
+        },
     )
     .await
     .unwrap();
@@ -1193,8 +1271,16 @@ async fn search_memory_types_filter_excludes_non_matching() {
 
     for (key, content, mt) in [
         ("f-1", "The sun is a star.", "memory"),
-        ("f-2", "Josh corrected the approach — prefers benchmarks first.", "observation"),
-        ("f-3", "Decided to use RRF with k=60 for retrieval.", "decision"),
+        (
+            "f-2",
+            "Josh corrected the approach — prefers benchmarks first.",
+            "observation",
+        ),
+        (
+            "f-3",
+            "Decided to use RRF with k=60 for retrieval.",
+            "decision",
+        ),
     ] {
         tools::store::handle(
             &h.pool,
@@ -1235,7 +1321,10 @@ async fn search_memory_types_filter_excludes_non_matching() {
     .unwrap();
 
     for hit in &out.results {
-        assert_eq!(hit.memory_type, "decision", "filter should exclude non-decision types");
+        assert_eq!(
+            hit.memory_type, "decision",
+            "filter should exclude non-decision types"
+        );
     }
     assert!(!out.results.is_empty(), "should find at least one decision");
 }
@@ -1286,7 +1375,7 @@ async fn search_returns_score_and_similarity() {
             source: None,
             metadata: None,
             memory_type: None,
-        external_refs: None,
+            external_refs: None,
         },
     )
     .await
@@ -1315,5 +1404,8 @@ async fn search_returns_score_and_similarity() {
     let hit = &out.results[0];
     assert!(hit.similarity > 0.0, "similarity should be raw cosine > 0");
     assert!(hit.score > 0.0, "score should be > 0");
-    assert_eq!(hit.similarity, hit.score, "with no weights/recency, score == similarity");
+    assert_eq!(
+        hit.similarity, hit.score,
+        "with no weights/recency, score == similarity"
+    );
 }

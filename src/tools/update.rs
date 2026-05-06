@@ -78,7 +78,13 @@ pub async fn handle(
     validate::profile(TOOL, &args.profile)?;
     let id = validate::parse_uuid(TOOL, "id", &args.id)?;
 
-    if args.content.is_none() && args.tags.is_none() && args.source.is_none() && args.metadata.is_none() && args.memory_type.is_none() && args.external_refs.is_none() {
+    if args.content.is_none()
+        && args.tags.is_none()
+        && args.source.is_none()
+        && args.metadata.is_none()
+        && args.memory_type.is_none()
+        && args.external_refs.is_none()
+    {
         return Err(ChittaError::InvalidArgument {
             tool: TOOL,
             argument: "fields".to_string(),
@@ -105,8 +111,9 @@ pub async fn handle(
     // If content changed, re-embed (both dense and sparse).
     let (embedding, sparse_embedding, re_embedded) = if let Some(ref content) = args.content {
         let embed_out = embedder.embed_full(content, TOOL).await?;
-        let sparse_json = serde_json::to_value(&embed_out.sparse)
-            .map_err(|e| ChittaError::Internal(format!("failed to serialize sparse embedding: {e}")))?;
+        let sparse_json = serde_json::to_value(&embed_out.sparse).map_err(|e| {
+            ChittaError::Internal(format!("failed to serialize sparse embedding: {e}"))
+        })?;
         (Some(Vector::from(embed_out.dense)), Some(sparse_json), true)
     } else {
         (None, None, false)
@@ -114,16 +121,18 @@ pub async fn handle(
 
     let row = db::update_memory(
         pool,
-        &args.profile,
-        id,
-        args.content.as_deref(),
-        embedding.as_ref(),
-        args.tags.as_deref(),
-        args.source.as_deref(),
-        args.metadata.as_ref(),
-        sparse_embedding.as_ref(),
-        args.memory_type.as_deref(),
-        args.external_refs.as_ref(),
+        &db::MemoryPatch {
+            profile: &args.profile,
+            id,
+            content: args.content.as_deref(),
+            embedding: embedding.as_ref(),
+            tags: args.tags.as_deref(),
+            source: args.source.as_deref(),
+            metadata: args.metadata.as_ref(),
+            sparse_embedding: sparse_embedding.as_ref(),
+            memory_type: args.memory_type.as_deref(),
+            external_refs: args.external_refs.as_ref(),
+        },
     )
     .await?
     .ok_or_else(|| ChittaError::NotFound {

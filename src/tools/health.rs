@@ -30,7 +30,11 @@ pub struct HealthOutput {
 }
 
 #[tracing::instrument(name = "tool.health_check", skip(pool, embedder, search_cfg))]
-pub async fn handle(pool: &PgPool, embedder: Arc<Embedder>, search_cfg: &SearchConfig) -> Result<HealthOutput> {
+pub async fn handle(
+    pool: &PgPool,
+    embedder: Arc<Embedder>,
+    search_cfg: &SearchConfig,
+) -> Result<HealthOutput> {
     let db_connected = sqlx::query_scalar::<_, i32>("SELECT 1")
         .fetch_one(pool)
         .await
@@ -41,8 +45,12 @@ pub async fn handle(pool: &PgPool, embedder: Arc<Embedder>, search_cfg: &SearchC
     let all_ok = db_connected && embedder_ok;
 
     let mut legs = vec!["dense"];
-    if search_cfg.rrf_fts { legs.push("fts"); }
-    if search_cfg.rrf_sparse { legs.push("sparse"); }
+    if search_cfg.rrf_fts {
+        legs.push("fts");
+    }
+    if search_cfg.rrf_sparse {
+        legs.push("sparse");
+    }
 
     Ok(HealthOutput {
         status: if all_ok { "ok" } else { "degraded" },

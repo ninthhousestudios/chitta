@@ -16,8 +16,18 @@ pub struct Envelope<T> {
 }
 
 impl<T> Envelope<T> {
-    pub fn new(results: Vec<T>, truncated: bool, total_available: Option<u64>, budget: u64) -> Self {
-        Self { results, truncated, total_available, budget_spent_tokens: budget }
+    pub fn new(
+        results: Vec<T>,
+        truncated: bool,
+        total_available: Option<u64>,
+        budget: u64,
+    ) -> Self {
+        Self {
+            results,
+            truncated,
+            total_available,
+            budget_spent_tokens: budget,
+        }
     }
 }
 

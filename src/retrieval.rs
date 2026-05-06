@@ -11,36 +11,53 @@ use crate::embedding::EmbedOutput;
 use crate::error::Result;
 use pgvector::Vector;
 
+pub struct HybridSearchParams<'a> {
+    pub profile: &'a str,
+    pub query_embed: &'a EmbedOutput,
+    pub k: i64,
+    pub tags: &'a [String],
+    pub memory_types: &'a [String],
+    pub recency_weight: f32,
+    pub recency_half_life_days: f32,
+    pub search_cfg: &'a SearchConfig,
+    pub query_text: &'a str,
+}
+
 #[tracing::instrument(
     name = "retrieval.search_hybrid",
-    skip(pool, query_embed, tags, memory_types, query_text, search_cfg),
-    fields(k, profile),
+    skip(pool, p),
+    fields(k = p.k, profile = p.profile)
 )]
 pub async fn search_hybrid(
     pool: &PgPool,
-    profile: &str,
-    query_embed: &EmbedOutput,
-    k: i64,
-    tags: &[String],
-    memory_types: &[String],
-    recency_weight: f32,
-    recency_half_life_days: f32,
-    search_cfg: &SearchConfig,
-    query_text: &str,
+    p: &HybridSearchParams<'_>,
 ) -> Result<(Vec<SearchHit>, i64)> {
-    let fetch_limit = k * search_cfg.rrf_candidates;
-    let query_vec = Vector::from(query_embed.dense.clone());
+    let fetch_limit = p.k * p.search_cfg.rrf_candidates;
+    let query_vec = Vector::from(p.query_embed.dense.clone());
 
-    // Dense leg (always on): recency_weight=0 so RRF ranks purely by cosine,
-    // min_similarity=0.0 so FTS/sparse candidates aren't pre-filtered out.
-    let dense_fut = db::search_by_embedding(
-        pool, profile, &query_vec, fetch_limit, tags, memory_types, 0.0, 0.0, recency_half_life_days,
-    );
+    let dense_params = db::SearchParams {
+        profile: p.profile,
+        query: &query_vec,
+        k: fetch_limit,
+        tags: p.tags,
+        memory_types: p.memory_types,
+        min_similarity: 0.0,
+        recency_weight: 0.0,
+        recency_half_life_days: p.recency_half_life_days,
+    };
+    let dense_fut = db::search_by_embedding(pool, &dense_params);
 
-    // FTS leg (optional).
     let fts_fut = async {
-        if search_cfg.rrf_fts {
-            db::search_by_fts(pool, profile, query_text, fetch_limit, tags, memory_types).await
+        if p.search_cfg.rrf_fts {
+            db::search_by_fts(
+                pool,
+                p.profile,
+                p.query_text,
+                fetch_limit,
+                p.tags,
+                p.memory_types,
+            )
+            .await
         } else {
             Ok(vec![])
         }
@@ -56,7 +73,7 @@ pub async fn search_hybrid(
 
     // Build rank lists: doc -> rank (0-based).
     let mut rrf_scores: HashMap<Uuid, f32> = HashMap::new();
-    let k_const = search_cfg.rrf_k as f32;
+    let k_const = p.search_cfg.rrf_k as f32;
 
     for (rank, hit) in dense_hits.iter().enumerate() {
         *rrf_scores.entry(hit.id).or_default() += 1.0 / (k_const + rank as f32);
@@ -66,7 +83,7 @@ pub async fn search_hybrid(
     }
 
     // Sparse re-ranking leg: operates on the candidate pool from dense + FTS.
-    if search_cfg.rrf_sparse && !query_embed.sparse.is_empty() {
+    if p.search_cfg.rrf_sparse && !p.query_embed.sparse.is_empty() {
         let candidate_ids: Vec<Uuid> = rrf_scores.keys().copied().collect();
         if !candidate_ids.is_empty() {
             match db::fetch_sparse_embeddings(pool, &candidate_ids).await {
@@ -74,7 +91,8 @@ pub async fn search_hybrid(
                     let mut sparse_scored: Vec<(Uuid, f32)> = sparse_docs
                         .into_iter()
                         .map(|(id, doc_sparse)| {
-                            let dot: f32 = query_embed
+                            let dot: f32 = p
+                                .query_embed
                                 .sparse
                                 .iter()
                                 .filter_map(|(tok, qw)| doc_sparse.get(tok).map(|dw| qw * dw))
@@ -82,7 +100,8 @@ pub async fn search_hybrid(
                             (id, dot)
                         })
                         .collect();
-                    sparse_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    sparse_scored
+                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                     for (rank, (id, _score)) in sparse_scored.iter().enumerate() {
                         *rrf_scores.entry(*id).or_default() += 1.0 / (k_const + rank as f32);
                     }
@@ -97,7 +116,7 @@ pub async fn search_hybrid(
     // Sort by RRF score descending, take top k.
     let mut ranked: Vec<(Uuid, f32)> = rrf_scores.into_iter().collect();
     ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    ranked.truncate(k as usize);
+    ranked.truncate(p.k as usize);
 
     if ranked.is_empty() {
         return Ok((vec![], total));
@@ -110,25 +129,29 @@ pub async fn search_hybrid(
     let dense_sim: HashMap<Uuid, f32> = dense_hits.iter().map(|h| (h.id, h.similarity)).collect();
 
     // Hydrate full SearchHit results and stamp scores.
-    let mut hits = db::fetch_search_hits_by_ids(pool, profile, &final_ids).await?;
+    let mut hits = db::fetch_search_hits_by_ids(pool, p.profile, &final_ids).await?;
     for hit in &mut hits {
         hit.similarity = dense_sim.get(&hit.id).copied().unwrap_or(0.0);
         hit.score = score_map.get(&hit.id).copied().unwrap_or(0.0);
     }
 
     // Apply recency re-ranking post-fusion if enabled.
-    if recency_weight > 0.0 {
+    if p.recency_weight > 0.0 {
         let now = chrono::Utc::now();
-        let hl_secs = (recency_half_life_days as f64) * 86400.0;
+        let hl_secs = (p.recency_half_life_days as f64) * 86400.0;
         for hit in &mut hits {
             let age_secs = (now - hit.event_time).num_seconds().max(0) as f64;
             let recency_factor = (-age_secs / hl_secs).exp() as f32;
-            hit.score *= 1.0 + recency_weight * recency_factor;
+            hit.score *= 1.0 + p.recency_weight * recency_factor;
         }
-        hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        hits.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 
-    apply_type_weights(&mut hits, &search_cfg.type_weights);
+    apply_type_weights(&mut hits, &p.search_cfg.type_weights);
 
     Ok((hits, total))
 }
@@ -142,7 +165,11 @@ pub fn apply_type_weights(hits: &mut [db::SearchHit], weights: &HashMap<String, 
             hit.score *= w;
         }
     }
-    hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 }
 
 #[cfg(test)]

@@ -114,8 +114,9 @@ pub async fn handle(
     let sparse_embedding = if embed_out.sparse.is_empty() {
         None
     } else {
-        Some(serde_json::to_value(&embed_out.sparse)
-            .map_err(|e| ChittaError::Internal(format!("failed to serialize sparse embedding: {e}")))?)
+        Some(serde_json::to_value(&embed_out.sparse).map_err(|e| {
+            ChittaError::Internal(format!("failed to serialize sparse embedding: {e}"))
+        })?)
     };
 
     let now = Utc::now();

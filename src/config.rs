@@ -50,8 +50,8 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self> {
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_string());
+        let database_url =
+            std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_string());
 
         let model_path = std::env::var_os("CHITTA_MODEL_PATH")
             .map(PathBuf::from)
@@ -66,8 +66,7 @@ impl Config {
         // Each session loads ~1-2 GB RAM (full BGE-M3 graph). Default 1
         // preserves v0.0.1 memory footprint; increase only when concurrent
         // embedding throughput justifies the RAM cost.
-        let embedder_pool_size: usize = parse_env_or("CHITTA_EMBEDDER_POOL_SIZE", 1)
-            .max(1); // floor at 1 — zero sessions is nonsensical
+        let embedder_pool_size: usize = parse_env_or("CHITTA_EMBEDDER_POOL_SIZE", 1).max(1); // floor at 1 — zero sessions is nonsensical
 
         // Default true; only "false" (case-insensitive) disables.
         let query_log: bool = std::env::var("CHITTA_QUERY_LOG")
@@ -151,11 +150,16 @@ fn parse_type_weights(s: &str) -> HashMap<String, f32> {
         };
         let key = k.trim();
         let Ok(weight) = v.trim().parse::<f32>() else {
-            tracing::warn!("CHITTA_TYPE_WEIGHTS: non-numeric value for {key:?}: {}", v.trim());
+            tracing::warn!(
+                "CHITTA_TYPE_WEIGHTS: non-numeric value for {key:?}: {}",
+                v.trim()
+            );
             continue;
         };
         if !VALID_MEMORY_TYPES.contains(&key) {
-            tracing::warn!("CHITTA_TYPE_WEIGHTS: unknown type {key:?} — valid: {VALID_MEMORY_TYPES:?}");
+            tracing::warn!(
+                "CHITTA_TYPE_WEIGHTS: unknown type {key:?} — valid: {VALID_MEMORY_TYPES:?}"
+            );
         }
         if weight <= 0.0 {
             tracing::warn!("CHITTA_TYPE_WEIGHTS: weight for {key:?} is {weight} (should be > 0)");

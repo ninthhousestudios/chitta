@@ -49,7 +49,10 @@ fn store_args_accepts_full_payload() {
     });
     let args: StoreArgs = serde_json::from_value(v).unwrap();
     assert!(args.event_time.is_some());
-    assert_eq!(args.tags.unwrap(), vec!["alpha".to_string(), "beta".to_string()]);
+    assert_eq!(
+        args.tags.unwrap(),
+        vec!["alpha".to_string(), "beta".to_string()]
+    );
 }
 
 #[test]
@@ -91,7 +94,18 @@ fn store_output_wire_keys() {
     let v = serde_json::to_value(&out).unwrap();
     assert_keys(
         &v,
-        &["id", "profile", "content", "event_time", "record_time", "tags", "source", "metadata", "memory_type", "idempotent_replay"],
+        &[
+            "id",
+            "profile",
+            "content",
+            "event_time",
+            "record_time",
+            "tags",
+            "source",
+            "metadata",
+            "memory_type",
+            "idempotent_replay",
+        ],
     );
     assert_eq!(v["idempotent_replay"], json!(false));
 }
@@ -112,7 +126,18 @@ fn get_output_wire_keys() {
         external_refs: None,
     };
     let v = serde_json::to_value(&out).unwrap();
-    assert_keys(&v, &["id", "profile", "content", "event_time", "record_time", "tags", "memory_type"]);
+    assert_keys(
+        &v,
+        &[
+            "id",
+            "profile",
+            "content",
+            "event_time",
+            "record_time",
+            "tags",
+            "memory_type",
+        ],
+    );
 }
 
 #[test]
@@ -134,9 +159,29 @@ fn search_output_envelope_shape() {
     };
     let env: SearchOutput = Envelope::new(vec![hit], false, Some(1), 42);
     let v = serde_json::to_value(&env).unwrap();
-    assert_keys(&v, &["results", "truncated", "total_available", "budget_spent_tokens"]);
+    assert_keys(
+        &v,
+        &[
+            "results",
+            "truncated",
+            "total_available",
+            "budget_spent_tokens",
+        ],
+    );
     let first = &v["results"][0];
-    assert_keys(first, &["id", "snippet", "similarity", "score", "event_time", "record_time", "tags", "memory_type"]);
+    assert_keys(
+        first,
+        &[
+            "id",
+            "snippet",
+            "similarity",
+            "score",
+            "event_time",
+            "record_time",
+            "tags",
+            "memory_type",
+        ],
+    );
 }
 
 // ---- Error contract ------------------------------------------------
@@ -162,7 +207,10 @@ fn every_error_variant_serializes_with_contract_fields() {
             received: Some(json!("")),
             next_action: "pass a profile".to_string(),
         },
-        ChittaError::ContentTooLong { tool: "store_memory", token_count: 9001 },
+        ChittaError::ContentTooLong {
+            tool: "store_memory",
+            token_count: 9001,
+        },
         ChittaError::NotFound {
             tool: "get_memory",
             kind: "memory",
@@ -175,9 +223,9 @@ fn every_error_variant_serializes_with_contract_fields() {
         },
         ChittaError::Db(sqlx::Error::PoolTimedOut),
         ChittaError::Db(sqlx::Error::Io(io::Error::other("connection reset"))),
-        ChittaError::Migrate(sqlx::migrate::MigrateError::Execute(
-            sqlx::Error::Io(io::Error::other("drift")),
-        )),
+        ChittaError::Migrate(sqlx::migrate::MigrateError::Execute(sqlx::Error::Io(
+            io::Error::other("drift"),
+        ))),
         ChittaError::Internal("unexpected".to_string()),
     ];
 
@@ -187,7 +235,10 @@ fn every_error_variant_serializes_with_contract_fields() {
 
         let tool = obj.get("tool").and_then(|v| v.as_str()).unwrap_or("");
         let constraint = obj.get("constraint").and_then(|v| v.as_str()).unwrap_or("");
-        let next_action = obj.get("next_action").and_then(|v| v.as_str()).unwrap_or("");
+        let next_action = obj
+            .get("next_action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         assert!(!tool.is_empty(), "empty `tool` for {e:?}");
         assert!(!constraint.is_empty(), "empty `constraint` for {e:?}");
         assert!(!next_action.is_empty(), "empty `next_action` for {e:?}");
@@ -246,7 +297,10 @@ fn chitta_to_rmcp_preserves_code_and_contract_fields() {
             codes::INVALID_PARAMS,
         ),
         (
-            ChittaError::ContentTooLong { tool: "store_memory", token_count: 9001 },
+            ChittaError::ContentTooLong {
+                tool: "store_memory",
+                token_count: 9001,
+            },
             codes::INVALID_PARAMS,
         ),
         (
@@ -265,18 +319,24 @@ fn chitta_to_rmcp_preserves_code_and_contract_fields() {
             },
             codes::INTERNAL_ERROR,
         ),
-        (ChittaError::Db(sqlx::Error::PoolTimedOut), codes::INTERNAL_ERROR),
+        (
+            ChittaError::Db(sqlx::Error::PoolTimedOut),
+            codes::INTERNAL_ERROR,
+        ),
         (
             ChittaError::Db(sqlx::Error::Io(io::Error::other("reset"))),
             codes::INTERNAL_ERROR,
         ),
         (
-            ChittaError::Migrate(sqlx::migrate::MigrateError::Execute(
-                sqlx::Error::Io(io::Error::other("drift")),
-            )),
+            ChittaError::Migrate(sqlx::migrate::MigrateError::Execute(sqlx::Error::Io(
+                io::Error::other("drift"),
+            ))),
             codes::INTERNAL_ERROR,
         ),
-        (ChittaError::Internal("unexpected".to_string()), codes::INTERNAL_ERROR),
+        (
+            ChittaError::Internal("unexpected".to_string()),
+            codes::INTERNAL_ERROR,
+        ),
     ];
 
     for (variant, expected_code) in variants {
@@ -301,7 +361,10 @@ fn chitta_to_rmcp_preserves_code_and_contract_fields() {
             .unwrap_or_else(|| panic!("missing `data` object for {label}: {wire}"));
         for required in ["tool", "constraint", "next_action"] {
             let v = data.get(required).and_then(|v| v.as_str()).unwrap_or("");
-            assert!(!v.is_empty(), "missing `data.{required}` for {label}: {wire}");
+            assert!(
+                !v.is_empty(),
+                "missing `data.{required}` for {label}: {wire}"
+            );
         }
     }
 }
@@ -363,7 +426,16 @@ fn update_output_wire_keys() {
     let v = serde_json::to_value(&out).unwrap();
     assert_keys(
         &v,
-        &["id", "profile", "content", "event_time", "record_time", "tags", "memory_type", "re_embedded"],
+        &[
+            "id",
+            "profile",
+            "content",
+            "event_time",
+            "record_time",
+            "tags",
+            "memory_type",
+            "re_embedded",
+        ],
     );
     assert_eq!(v["re_embedded"], json!(true));
 }
@@ -427,5 +499,15 @@ fn list_output_wire_keys() {
     let v = serde_json::to_value(&out).unwrap();
     assert_keys(&v, &["memories", "total_in_profile"]);
     let first = &v["memories"][0];
-    assert_keys(first, &["id", "snippet", "event_time", "record_time", "tags", "memory_type"]);
+    assert_keys(
+        first,
+        &[
+            "id",
+            "snippet",
+            "event_time",
+            "record_time",
+            "tags",
+            "memory_type",
+        ],
+    );
 }

@@ -6,10 +6,10 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::Json;
 use chrono::Utc;
 use pgvector::Vector;
 use serde::{Deserialize, Serialize};
@@ -30,13 +30,14 @@ pub struct IngestRequest {
     pub profile: String,
     #[serde(default = "default_source")]
     pub source: String,
-    #[serde(default = "default_max_importance")]
-    pub max_importance: String,
 }
 
-fn default_profile() -> String { "chitta".to_string() }
-fn default_source() -> String { "hook:post".to_string() }
-fn default_max_importance() -> String { "medium".to_string() }
+fn default_profile() -> String {
+    "chitta".to_string()
+}
+fn default_source() -> String {
+    "hook:post".to_string()
+}
 
 #[derive(Debug, Serialize)]
 pub struct IngestResponse {
@@ -51,7 +52,6 @@ pub struct IngestItem {
     pub project: Option<String>,
     pub profile: String,
     pub source: String,
-    pub max_importance: String,
 }
 
 #[derive(Clone)]
@@ -83,13 +83,15 @@ pub async fn ingest_handler(
         project: req.project,
         profile: req.profile,
         source: req.source,
-        max_importance: req.max_importance,
     };
 
     match state.tx.try_send(item) {
         Ok(()) => (
             StatusCode::ACCEPTED,
-            Json(serde_json::json!(IngestResponse { queued: true, queue_id })),
+            Json(serde_json::json!(IngestResponse {
+                queued: true,
+                queue_id
+            })),
         ),
         Err(mpsc::error::TrySendError::Full(_)) => (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -120,12 +122,24 @@ const NARRATION_PREFIXES: &[&str] = &[
 ];
 
 const ANCHOR_PHRASES: &[(&str, &str)] = &[
-    ("a technical decision was made about architecture or design", "decision"),
+    (
+        "a technical decision was made about architecture or design",
+        "decision",
+    ),
     ("a bug was found or a problem was diagnosed", "observation"),
     ("a preference or convention was established", "observation"),
-    ("an approach was tried and it failed or did not work", "observation"),
-    ("a non-obvious constraint or requirement was discovered", "observation"),
-    ("a correction was made to fix incorrect understanding", "decision"),
+    (
+        "an approach was tried and it failed or did not work",
+        "observation",
+    ),
+    (
+        "a non-obvious constraint or requirement was discovered",
+        "observation",
+    ),
+    (
+        "a correction was made to fix incorrect understanding",
+        "decision",
+    ),
 ];
 
 struct AnchorEmbedding {
@@ -182,7 +196,7 @@ async fn process_item(
     embedder: &Arc<Embedder>,
     anchors: &[AnchorEmbedding],
 ) -> Result<(), ChittaError> {
-    let sentences = split_sentences(&item.text);
+    let sentences = split_chunks(&item.text);
     let mut stored = 0u32;
     let mut seen_hashes: HashSet<String> = HashSet::new();
 
@@ -312,7 +326,7 @@ fn build_tags(project: Option<&str>, source: &str) -> Vec<String> {
     tags
 }
 
-fn split_sentences(text: &str) -> Vec<String> {
+fn split_chunks(text: &str) -> Vec<String> {
     let mut sentences = Vec::new();
     let mut current = String::new();
     let mut in_code_fence = false;
@@ -381,23 +395,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn split_basic_sentences() {
+    fn split_basic_chunks() {
         let text = "First sentence. Second sentence. Third.";
-        let result = split_sentences(text);
+        let result = split_chunks(text);
         assert_eq!(result, vec!["First sentence. Second sentence. Third."]);
     }
 
     #[test]
-    fn split_by_newlines() {
+    fn split_chunks_by_blank_lines() {
         let text = "First paragraph here.\n\nSecond paragraph here.";
-        let result = split_sentences(text);
-        assert_eq!(result, vec!["First paragraph here.", "Second paragraph here."]);
+        let result = split_chunks(text);
+        assert_eq!(
+            result,
+            vec!["First paragraph here.", "Second paragraph here."]
+        );
     }
 
     #[test]
-    fn split_skips_code_fences() {
+    fn split_chunks_skips_code_fences() {
         let text = "Before code.\n```\nlet x = 1;\n```\nAfter code.";
-        let result = split_sentences(text);
+        let result = split_chunks(text);
         assert_eq!(result, vec!["Before code.", "After code."]);
     }
 
@@ -421,15 +438,17 @@ mod tests {
     #[test]
     fn url_not_split() {
         let text = "Visit https://example.com/path.html for more.";
-        assert!(!ends_with_sentence_boundary("https://example.com/path.html"));
-        let result = split_sentences(text);
+        assert!(!ends_with_sentence_boundary(
+            "https://example.com/path.html"
+        ));
+        let result = split_chunks(text);
         assert_eq!(result.len(), 1);
     }
 
     #[test]
     fn version_not_split() {
         let text = "Using version v1.2.3. It works well.";
-        let result = split_sentences(text);
+        let result = split_chunks(text);
         assert_eq!(result.len(), 1);
     }
 

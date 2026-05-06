@@ -83,10 +83,9 @@ impl ChittaError {
             | Self::InvalidArgument { .. }
             | Self::ContentTooLong { .. }
             | Self::NotFound { .. } => codes::INVALID_PARAMS,
-            Self::Embedding { .. }
-            | Self::Db(_)
-            | Self::Migrate(_)
-            | Self::Internal(_) => codes::INTERNAL_ERROR,
+            Self::Embedding { .. } | Self::Db(_) | Self::Migrate(_) | Self::Internal(_) => {
+                codes::INTERNAL_ERROR
+            }
         }
     }
 
@@ -129,14 +128,22 @@ impl ChittaError {
                      memory with its own idempotency_key"
                         .to_string(),
             },
-            Self::NotFound { tool, kind, next_action } => ErrorData {
+            Self::NotFound {
+                tool,
+                kind,
+                next_action,
+            } => ErrorData {
                 tool,
                 argument: None,
                 constraint: format!("{kind} exists in the given profile"),
                 received: None,
                 next_action: next_action.clone(),
             },
-            Self::Embedding { tool, message, next_action } => ErrorData {
+            Self::Embedding {
+                tool,
+                message,
+                next_action,
+            } => ErrorData {
                 tool,
                 argument: None,
                 constraint: "embedding pipeline completes without error".to_string(),
@@ -176,9 +183,7 @@ impl ChittaError {
 /// permanent (report as a bug with the inner message).
 fn db_next_action(e: &sqlx::Error) -> String {
     match e {
-        sqlx::Error::PoolTimedOut
-        | sqlx::Error::PoolClosed
-        | sqlx::Error::WorkerCrashed => {
+        sqlx::Error::PoolTimedOut | sqlx::Error::PoolClosed | sqlx::Error::WorkerCrashed => {
             "Retry the request. If it repeats, the database pool is saturated or unhealthy — \
              check server load and DATABASE_URL reachability."
                 .to_string()
@@ -206,11 +211,9 @@ fn db_next_action(e: &sqlx::Error) -> String {
              migrations applied to the database."
                 .to_string()
         }
-        _ => {
-            "Retry the request. If the error repeats, check server logs for detail and report \
+        _ => "Retry the request. If the error repeats, check server logs for detail and report \
              as a bug if the cause is unclear."
-                .to_string()
-        }
+            .to_string(),
     }
 }
 
@@ -241,7 +244,10 @@ mod tests {
 
     #[test]
     fn content_too_long_reports_token_count() {
-        let e = ChittaError::ContentTooLong { tool: "store_memory", token_count: 11432 };
+        let e = ChittaError::ContentTooLong {
+            tool: "store_memory",
+            token_count: 11432,
+        };
         let data = e.data();
         has_required_fields(&data);
         let received = data.received.unwrap();
@@ -298,7 +304,10 @@ mod tests {
                 received: None,
                 next_action: "n".to_string(),
             },
-            ChittaError::ContentTooLong { tool: "store_memory", token_count: 1 },
+            ChittaError::ContentTooLong {
+                tool: "store_memory",
+                token_count: 1,
+            },
             ChittaError::NotFound {
                 tool: "get_memory",
                 kind: "memory",
@@ -312,9 +321,9 @@ mod tests {
             ChittaError::Db(sqlx::Error::PoolTimedOut),
             ChittaError::Db(sqlx::Error::Io(io::Error::other("reset"))),
             ChittaError::Db(sqlx::Error::RowNotFound),
-            ChittaError::Migrate(sqlx::migrate::MigrateError::Execute(
-                sqlx::Error::Io(io::Error::other("schema off")),
-            )),
+            ChittaError::Migrate(sqlx::migrate::MigrateError::Execute(sqlx::Error::Io(
+                io::Error::other("schema off"),
+            ))),
             ChittaError::Internal("unexpected".to_string()),
         ];
         for e in &variants {

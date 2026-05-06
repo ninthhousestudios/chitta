@@ -10,7 +10,13 @@ use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
-use chitta_rs::{config::{Config, chitta_home}, db, embedding::Embedder, ingest, mcp::ChittaServer};
+use chitta_rs::{
+    config::{Config, chitta_home},
+    db,
+    embedding::Embedder,
+    ingest,
+    mcp::ChittaServer,
+};
 
 /// chitta: agent-native persistent memory MCP server.
 #[derive(Debug, Parser)]
@@ -87,7 +93,9 @@ async fn main() -> Result<()> {
     );
 
     let pool = db::connect(&cfg).await.context("connecting to database")?;
-    db::run_migrations(&pool).await.context("running migrations")?;
+    db::run_migrations(&pool)
+        .await
+        .context("running migrations")?;
 
     let query_log_enabled = if cfg.query_log {
         match sqlx::query("SELECT 1 FROM query_log LIMIT 0")
@@ -99,7 +107,9 @@ async fn main() -> Result<()> {
                 true
             }
             Err(sqlx::Error::Database(e)) if e.message().contains("does not exist") => {
-                tracing::warn!("query_log table not found — run migration 0002 to enable search logging");
+                tracing::warn!(
+                    "query_log table not found — run migration 0002 to enable search logging"
+                );
                 false
             }
             Err(e) => {
@@ -162,7 +172,9 @@ async fn run_replay(profile: Option<String>, limit: i64) -> Result<()> {
         .init();
 
     let pool = db::connect(&cfg).await.context("connecting to database")?;
-    db::run_migrations(&pool).await.context("running migrations")?;
+    db::run_migrations(&pool)
+        .await
+        .context("running migrations")?;
 
     let entries = db::read_query_log(&pool, profile.as_deref(), limit)
         .await
@@ -174,23 +186,32 @@ async fn run_replay(profile: Option<String>, limit: i64) -> Result<()> {
     }
 
     println!("Replay Results ({} queries):", entries.len());
-    println!("┌─────┬──────────┬──────────────────────────────────────────────────────┬─────────┬──────────┬─────────┐");
-    println!("│ {:<3} │ {:<8} │ {:<52} │ {:<7} │ {:<8} │ {:<7} │", "#", "Profile", "Query (50ch)", "Overlap", "New", "Dropped");
-    println!("├─────┼──────────┼──────────────────────────────────────────────────────┼─────────┼──────────┼─────────┤");
+    println!(
+        "┌─────┬──────────┬──────────────────────────────────────────────────────┬─────────┬──────────┬─────────┐"
+    );
+    println!(
+        "│ {:<3} │ {:<8} │ {:<52} │ {:<7} │ {:<8} │ {:<7} │",
+        "#", "Profile", "Query (50ch)", "Overlap", "New", "Dropped"
+    );
+    println!(
+        "├─────┼──────────┼──────────────────────────────────────────────────────┼─────────┼──────────┼─────────┤"
+    );
 
     let mut total_overlap: f64 = 0.0;
 
     for (idx, entry) in entries.iter().enumerate() {
         let (new_hits, _total) = db::search_by_embedding(
             &pool,
-            &entry.profile,
-            &entry.embedding,
-            entry.k as i64,
-            &entry.tags,
-            &entry.memory_types,
-            entry.min_similarity,
-            0.0,
-            30.0,
+            &db::SearchParams {
+                profile: &entry.profile,
+                query: &entry.embedding,
+                k: entry.k as i64,
+                tags: &entry.tags,
+                memory_types: &entry.memory_types,
+                min_similarity: entry.min_similarity,
+                recency_weight: 0.0,
+                recency_half_life_days: 30.0,
+            },
         )
         .await
         .context("re-running search")?;
@@ -232,7 +253,9 @@ async fn run_replay(profile: Option<String>, limit: i64) -> Result<()> {
         );
     }
 
-    println!("└─────┴──────────┴──────────────────────────────────────────────────────┴─────────┴──────────┴─────────┘");
+    println!(
+        "└─────┴──────────┴──────────────────────────────────────────────────────┴─────────┴──────────┴─────────┘"
+    );
 
     let avg_overlap = total_overlap / entries.len() as f64;
     println!();
@@ -254,7 +277,9 @@ async fn run_backfill(batch_size: i64) -> Result<()> {
         .init();
 
     let pool = db::connect(&cfg).await.context("connecting to database")?;
-    db::run_migrations(&pool).await.context("running migrations")?;
+    db::run_migrations(&pool)
+        .await
+        .context("running migrations")?;
 
     let embedder = Embedder::load(
         &cfg.model_file(),
@@ -305,7 +330,11 @@ async fn run_backfill(batch_size: i64) -> Result<()> {
                 Ok::<_, anyhow::Error>(())
             });
             if join_set.len() >= concurrency {
-                join_set.join_next().await.unwrap()?.context("backfill task")?;
+                join_set
+                    .join_next()
+                    .await
+                    .unwrap()?
+                    .context("backfill task")?;
             }
         }
         while let Some(result) = join_set.join_next().await {
@@ -347,7 +376,10 @@ async fn serve_http(
         .with_context(|| format!("reading auth token from {}", token_path.display()))?
         .trim()
         .to_string();
-    anyhow::ensure!(!bearer_token.is_empty(), "auth token file is empty after trimming whitespace");
+    anyhow::ensure!(
+        !bearer_token.is_empty(),
+        "auth token file is empty after trimming whitespace"
+    );
     anyhow::ensure!(
         bearer_token.chars().all(|c| !c.is_control()),
         "auth token contains control characters — regenerate the token file"
@@ -358,7 +390,11 @@ async fn serve_http(
     let http_addr = cli.http_addr.unwrap_or_else(|| cfg.http_addr.clone());
     let http_port = cli.http_port.unwrap_or(cfg.http_port);
 
-    let mut allowed_hosts = vec!["localhost".to_string(), "127.0.0.1".to_string(), "::1".to_string()];
+    let mut allowed_hosts = vec![
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+        "::1".to_string(),
+    ];
     if http_addr != "127.0.0.1" && http_addr != "localhost" && http_addr != "::1" {
         allowed_hosts.push(http_addr.clone());
     }
@@ -374,7 +410,14 @@ async fn serve_http(
     let ql = query_log_enabled;
     let search_cfg = cfg.search.clone();
     let mcp_service = StreamableHttpService::new(
-        move || Ok(ChittaServer::new(pool_clone.clone(), Arc::clone(&embedder_clone), ql, search_cfg.clone())),
+        move || {
+            Ok(ChittaServer::new(
+                pool_clone.clone(),
+                Arc::clone(&embedder_clone),
+                ql,
+                search_cfg.clone(),
+            ))
+        },
         session_manager,
         config,
     );
@@ -413,7 +456,10 @@ async fn serve_http(
     #[allow(deprecated)]
     let app = axum::Router::new()
         .route("/mcp", any_service(mcp_service))
-        .route("/ingest", axum::routing::post(ingest::ingest_handler).with_state(ingest_state))
+        .route(
+            "/ingest",
+            axum::routing::post(ingest::ingest_handler).with_state(ingest_state),
+        )
         .layer(normalize_accept)
         .layer(ValidateRequestHeaderLayer::bearer(&bearer_token));
 
@@ -432,7 +478,6 @@ async fn serve_http(
         })
         .await
         .context("HTTP server exited with error")?;
-
 
     Ok(())
 }

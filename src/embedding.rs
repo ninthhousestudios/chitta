@@ -33,7 +33,7 @@
 //! starting shape).
 
 use std::collections::HashMap;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
@@ -167,7 +167,11 @@ impl Embedder {
         Ok(self.embed_full(text, tool).await?.dense)
     }
 
-    pub async fn embed_full(self: &Arc<Self>, text: &str, tool: &'static str) -> Result<EmbedOutput> {
+    pub async fn embed_full(
+        self: &Arc<Self>,
+        text: &str,
+        tool: &'static str,
+    ) -> Result<EmbedOutput> {
         // 1. Tokenize (fast, sync — no lock needed).
         let encoding = self
             .tokenizer
@@ -197,9 +201,8 @@ impl Embedder {
         let input_ids: Vec<i64> = ids.iter().map(|&id| id as i64).collect();
         let attention_mask: Vec<i64> = attn.iter().map(|&m| m as i64).collect();
 
-        let input_ids_arr = Array2::from_shape_vec((1, seq_len), input_ids).map_err(|e| {
-            ChittaError::Internal(format!("failed to build input_ids tensor: {e}"))
-        })?;
+        let input_ids_arr = Array2::from_shape_vec((1, seq_len), input_ids)
+            .map_err(|e| ChittaError::Internal(format!("failed to build input_ids tensor: {e}")))?;
         let attention_mask_arr =
             Array2::from_shape_vec((1, seq_len), attention_mask).map_err(|e| {
                 ChittaError::Internal(format!("failed to build attention_mask tensor: {e}"))
@@ -211,9 +214,11 @@ impl Embedder {
             Value::from_array(attention_mask_arr).map_err(|e| ort_to_embed_err(e, tool))?;
 
         // 3. Acquire pool slot (async wait if all sessions are busy).
-        let _permit = self.semaphore.acquire().await.map_err(|_| {
-            ChittaError::Internal("embedder pool closed".into())
-        })?;
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .map_err(|_| ChittaError::Internal("embedder pool closed".into()))?;
 
         // 4. Find an available session via round-robin try_lock.
         let session_idx = self.acquire_session();
@@ -362,7 +367,10 @@ impl Embedder {
 
         let (result, panicked) = blocking_result;
         if panicked {
-            tracing::warn!(session = session_idx, "ONNX session panicked — replacing slot");
+            tracing::warn!(
+                session = session_idx,
+                "ONNX session panicked — replacing slot"
+            );
             self.replace_session(session_idx);
         }
 

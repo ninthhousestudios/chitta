@@ -51,15 +51,15 @@ pub async fn handle(pool: &PgPool, args: GetArgs) -> Result<GetOutput> {
     validate::profile(TOOL, &args.profile)?;
     let id = validate::parse_uuid(TOOL, "id", &args.id)?;
 
-    let row = db::get_memory_by_id(pool, &args.profile, id).await?.ok_or_else(|| {
-        ChittaError::NotFound {
+    let row = db::get_memory_by_id(pool, &args.profile, id)
+        .await?
+        .ok_or_else(|| ChittaError::NotFound {
             tool: TOOL,
             kind: "memory",
             next_action:
                 "Verify the profile and id, or call search_memories to locate the intended memory."
                     .to_string(),
-        }
-    })?;
+        })?;
 
     Ok(GetOutput {
         id: row.id,

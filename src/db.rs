@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use pgvector::Vector;
 use sqlx::FromRow;
-use sqlx::postgres::{PgPoolOptions, PgPool};
+use sqlx::postgres::{PgPool, PgPoolOptions};
 use uuid::Uuid;
 
 use crate::config::Config;
@@ -53,6 +53,45 @@ pub struct SearchHit {
     pub external_refs: Option<serde_json::Value>,
 }
 
+pub struct MemoryPatch<'a> {
+    pub profile: &'a str,
+    pub id: Uuid,
+    pub content: Option<&'a str>,
+    pub embedding: Option<&'a Vector>,
+    pub tags: Option<&'a [String]>,
+    pub source: Option<&'a str>,
+    pub metadata: Option<&'a serde_json::Value>,
+    pub sparse_embedding: Option<&'a serde_json::Value>,
+    pub memory_type: Option<&'a str>,
+    pub external_refs: Option<&'a serde_json::Value>,
+}
+
+pub struct SearchParams<'a> {
+    pub profile: &'a str,
+    pub query: &'a Vector,
+    pub k: i64,
+    pub tags: &'a [String],
+    pub memory_types: &'a [String],
+    pub min_similarity: f32,
+    pub recency_weight: f32,
+    pub recency_half_life_days: f32,
+}
+
+pub struct QueryLogInput<'a> {
+    pub profile: &'a str,
+    pub query_text: &'a str,
+    pub embedding: &'a Vector,
+    pub k: i64,
+    pub min_similarity: f32,
+    pub tags: &'a [String],
+    pub memory_types: &'a [String],
+    pub result_ids: &'a [Uuid],
+    pub result_scores: &'a [f32],
+    pub total_available: Option<i64>,
+    pub truncated: bool,
+    pub latency_ms: i64,
+}
+
 pub async fn connect(cfg: &Config) -> Result<PgPool> {
     let pool = PgPoolOptions::new()
         .max_connections(cfg.db_max_connections)
@@ -76,10 +115,7 @@ const PG_UNIQUE_VIOLATION: &str = "23505";
 /// return the existing row — this is the idempotency contract (Principle 6).
 ///
 /// Returns `(row, idempotent_replay)`.
-pub async fn insert_or_fetch_memory(
-    pool: &PgPool,
-    new: &MemoryRow,
-) -> Result<(MemoryRow, bool)> {
+pub async fn insert_or_fetch_memory(pool: &PgPool, new: &MemoryRow) -> Result<(MemoryRow, bool)> {
     let insert_result = sqlx::query_as::<_, MemoryRow>(
         r#"
         insert into memories
@@ -151,11 +187,7 @@ pub async fn find_by_idempotency_key(
     Ok(row)
 }
 
-pub async fn get_memory_by_id(
-    pool: &PgPool,
-    profile: &str,
-    id: Uuid,
-) -> Result<Option<MemoryRow>> {
+pub async fn get_memory_by_id(pool: &PgPool, profile: &str, id: Uuid) -> Result<Option<MemoryRow>> {
     let row = sqlx::query_as::<_, MemoryRow>(
         r#"
         select id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type, external_refs, invalidated_at
@@ -177,19 +209,7 @@ pub async fn get_memory_by_id(
 ///
 /// Returns the updated row, or `None` if the `(profile, id)` pair does not
 /// exist (caller turns that into `NotFound`).
-pub async fn update_memory(
-    pool: &PgPool,
-    profile: &str,
-    id: Uuid,
-    content: Option<&str>,
-    embedding: Option<&Vector>,
-    tags: Option<&[String]>,
-    source: Option<&str>,
-    metadata: Option<&serde_json::Value>,
-    sparse_embedding: Option<&serde_json::Value>,
-    memory_type: Option<&str>,
-    external_refs: Option<&serde_json::Value>,
-) -> Result<Option<MemoryRow>> {
+pub async fn update_memory(pool: &PgPool, patch: &MemoryPatch<'_>) -> Result<Option<MemoryRow>> {
     let row = sqlx::query_as::<_, MemoryRow>(
         r#"
         UPDATE memories
@@ -206,16 +226,16 @@ pub async fn update_memory(
         RETURNING id, profile, content, embedding, event_time, record_time, tags, idempotency_key, source, metadata, sparse_embedding, memory_type, external_refs, invalidated_at
         "#,
     )
-    .bind(profile)
-    .bind(id)
-    .bind(content)
-    .bind(embedding)
-    .bind(tags)
-    .bind(source)
-    .bind(metadata)
-    .bind(sparse_embedding)
-    .bind(memory_type)
-    .bind(external_refs)
+    .bind(patch.profile)
+    .bind(patch.id)
+    .bind(patch.content)
+    .bind(patch.embedding)
+    .bind(patch.tags)
+    .bind(patch.source)
+    .bind(patch.metadata)
+    .bind(patch.sparse_embedding)
+    .bind(patch.memory_type)
+    .bind(patch.external_refs)
     .fetch_optional(pool)
     .await?;
     Ok(row)
@@ -355,26 +375,15 @@ const HNSW_EF_SEARCH_MAX: i64 = 1000;
 /// the ANN query only and doesn't leak to other pool users.
 pub async fn search_by_embedding(
     pool: &PgPool,
-    profile: &str,
-    query: &Vector,
-    k: i64,
-    tags: &[String],
-    memory_types: &[String],
-    min_similarity: f32,
-    recency_weight: f32,
-    recency_half_life_days: f32,
+    p: &SearchParams<'_>,
 ) -> Result<(Vec<SearchHit>, i64)> {
     // ef_search is an integer GUC; SET LOCAL does not accept bind params,
     // so we clamp to a known-safe integer range and format inline. k is
     // already range-checked by the validator; the clamp below is belt +
     // suspenders against a future caller reaching this fn with a bad k.
-    let ef_search = (k.max(1) * 4).clamp(HNSW_EF_SEARCH_MIN, HNSW_EF_SEARCH_MAX);
+    let ef_search = (p.k.max(1) * 4).clamp(HNSW_EF_SEARCH_MIN, HNSW_EF_SEARCH_MAX);
     let mut tx = pool.begin().await?;
 
-    // Cheap pre-count under the same filters we expose to the caller.
-    // Runs inside the transaction so the count and ANN query see the same
-    // MVCC snapshot. No distance term here — it's a sequential filter
-    // count, bounded by the size of the profile.
     let total: i64 = sqlx::query_scalar(
         r#"
         select count(*)::bigint
@@ -385,9 +394,9 @@ pub async fn search_by_embedding(
           and ($3::text[] = '{}' or memory_type = ANY($3))
         "#,
     )
-    .bind(profile)
-    .bind(tags)
-    .bind(memory_types)
+    .bind(p.profile)
+    .bind(p.tags)
+    .bind(p.memory_types)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -395,13 +404,8 @@ pub async fn search_by_embedding(
         .execute(&mut *tx)
         .await?;
 
-    // `1 - (embedding <=> $2)::real` gives cosine similarity in [0, 1] for
-    // L2-normalized vectors. When recency_weight > 0, we over-fetch by 2x
-    // from the HNSW index (pure cosine order), then re-rank with a temporal
-    // boost and take the top k. This lets HNSW drive the candidate set
-    // while recency influences final ordering.
-    let use_recency = recency_weight > 0.0;
-    let fetch_limit = if use_recency { k * 2 } else { k };
+    let use_recency = p.recency_weight > 0.0;
+    let fetch_limit = if use_recency { p.k * 2 } else { p.k };
 
     let hits = sqlx::query_as::<_, SearchHit>(
         r#"
@@ -426,33 +430,37 @@ pub async fn search_by_embedding(
         limit $5
         "#,
     )
-    .bind(profile)
-    .bind(query)
-    .bind(tags)
-    .bind(min_similarity)
+    .bind(p.profile)
+    .bind(p.query)
+    .bind(p.tags)
+    .bind(p.min_similarity)
     .bind(fetch_limit)
-    .bind(memory_types)
+    .bind(p.memory_types)
     .fetch_all(&mut *tx)
     .await?;
 
-    // Initialise score = similarity (raw cosine) so downstream code can
-    // mutate score while similarity stays as the original cosine value.
     let mut hits: Vec<SearchHit> = hits
         .into_iter()
-        .map(|mut h| { h.score = h.similarity; h })
+        .map(|mut h| {
+            h.score = h.similarity;
+            h
+        })
         .collect();
 
-    // Re-rank with recency boost: score = cosine * (1 + w * exp(-age/half_life))
     if use_recency {
         let now = Utc::now();
-        let hl_secs = (recency_half_life_days as f64) * 86400.0;
+        let hl_secs = (p.recency_half_life_days as f64) * 86400.0;
         for h in &mut hits {
             let age_secs = (now - h.event_time).num_seconds().max(0) as f64;
             let recency_factor = (-age_secs / hl_secs).exp() as f32;
-            h.score *= 1.0 + recency_weight * recency_factor;
+            h.score *= 1.0 + p.recency_weight * recency_factor;
         }
-        hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-        hits.truncate(k as usize);
+        hits.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        hits.truncate(p.k as usize);
     }
 
     tx.commit().await?;
@@ -596,21 +604,7 @@ pub async fn read_query_log(
 
 /// Append-only insert into `query_log`. Fire-and-forget from the search
 /// handler — errors are logged but never propagated to the caller.
-pub async fn insert_query_log(
-    pool: &PgPool,
-    profile: &str,
-    query_text: &str,
-    embedding: &Vector,
-    k: i64,
-    min_similarity: f32,
-    tags: &[String],
-    memory_types: &[String],
-    result_ids: &[Uuid],
-    result_scores: &[f32],
-    total_available: Option<i64>,
-    truncated: bool,
-    latency_ms: i64,
-) -> Result<()> {
+pub async fn insert_query_log(pool: &PgPool, e: &QueryLogInput<'_>) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO query_log
@@ -619,18 +613,18 @@ pub async fn insert_query_log(
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         "#,
     )
-    .bind(profile)
-    .bind(query_text)
-    .bind(embedding)
-    .bind(k as i32)
-    .bind(min_similarity)
-    .bind(tags)
-    .bind(memory_types)
-    .bind(result_ids)
-    .bind(result_scores)
-    .bind(total_available)
-    .bind(truncated)
-    .bind(latency_ms as i32)
+    .bind(e.profile)
+    .bind(e.query_text)
+    .bind(e.embedding)
+    .bind(e.k as i32)
+    .bind(e.min_similarity)
+    .bind(e.tags)
+    .bind(e.memory_types)
+    .bind(e.result_ids)
+    .bind(e.result_scores)
+    .bind(e.total_available)
+    .bind(e.truncated)
+    .bind(e.latency_ms as i32)
     .execute(pool)
     .await?;
     Ok(())
@@ -668,10 +662,7 @@ pub async fn insert_derivation(
     Ok(row)
 }
 
-pub async fn get_derivations_for(
-    pool: &PgPool,
-    derived_id: Uuid,
-) -> Result<Vec<DerivationRow>> {
+pub async fn get_derivations_for(pool: &PgPool, derived_id: Uuid) -> Result<Vec<DerivationRow>> {
     let rows = sqlx::query_as::<_, DerivationRow>(
         r#"
         SELECT id, derived_id, source_id, derivation_type, created_at
@@ -686,10 +677,7 @@ pub async fn get_derivations_for(
     Ok(rows)
 }
 
-pub async fn get_derived_from(
-    pool: &PgPool,
-    source_id: Uuid,
-) -> Result<Vec<DerivationRow>> {
+pub async fn get_derived_from(pool: &PgPool, source_id: Uuid) -> Result<Vec<DerivationRow>> {
     let rows = sqlx::query_as::<_, DerivationRow>(
         r#"
         SELECT id, derived_id, source_id, derivation_type, created_at

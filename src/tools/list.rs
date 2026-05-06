@@ -77,7 +77,9 @@ pub async fn handle(pool: &PgPool, args: ListArgs) -> Result<ListOutput> {
             argument: "limit".to_string(),
             constraint: format!("integer in [1, {MAX_LIMIT}]"),
             received: Some(serde_json::json!(limit)),
-            next_action: format!("Pass limit between 1 and {MAX_LIMIT} (default is {DEFAULT_LIMIT})."),
+            next_action: format!(
+                "Pass limit between 1 and {MAX_LIMIT} (default is {DEFAULT_LIMIT})."
+            ),
         });
     }
 
@@ -86,7 +88,8 @@ pub async fn handle(pool: &PgPool, args: ListArgs) -> Result<ListOutput> {
     let memory_types = args.memory_types.unwrap_or_default();
     validate::memory_types(TOOL, &memory_types)?;
 
-    let (rows, total_in_profile) = db::list_recent_with_count(pool, &args.profile, limit, &tags, &memory_types).await?;
+    let (rows, total_in_profile) =
+        db::list_recent_with_count(pool, &args.profile, limit, &tags, &memory_types).await?;
 
     let memories = rows
         .into_iter()
@@ -102,5 +105,8 @@ pub async fn handle(pool: &PgPool, args: ListArgs) -> Result<ListOutput> {
         })
         .collect();
 
-    Ok(ListOutput { memories, total_in_profile })
+    Ok(ListOutput {
+        memories,
+        total_in_profile,
+    })
 }
