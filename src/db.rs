@@ -75,6 +75,9 @@ pub struct SearchParams<'a> {
     pub min_similarity: f32,
     pub recency_weight: f32,
     pub recency_half_life_days: f32,
+    pub exclude_invalidated: bool,
+    pub exclude_retired: bool,
+    pub ref_filter_json: Option<&'a serde_json::Value>,
 }
 
 pub struct QueryLogInput<'a> {
@@ -389,14 +392,19 @@ pub async fn search_by_embedding(
         select count(*)::bigint
         from memories
         where profile = $1
-          and invalidated_at is null
+          and (not $4 or invalidated_at is null)
+          and (not $5 or not exists (select 1 from derivations where source_id = memories.id))
           and ($2::text[] = '{}' or tags && $2)
           and ($3::text[] = '{}' or memory_type = ANY($3))
+          and ($6::jsonb is null or external_refs @> $6)
         "#,
     )
     .bind(p.profile)
     .bind(p.tags)
     .bind(p.memory_types)
+    .bind(p.exclude_invalidated)
+    .bind(p.exclude_retired)
+    .bind(p.ref_filter_json)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -422,10 +430,12 @@ pub async fn search_by_embedding(
             external_refs
         from memories
         where profile = $1
-          and invalidated_at is null
+          and (not $7 or invalidated_at is null)
+          and (not $8 or not exists (select 1 from derivations where source_id = memories.id))
           and ($3::text[] = '{}' or tags && $3)
           and ($6::text[] = '{}' or memory_type = ANY($6))
           and (1.0 - (embedding <=> $2))::real >= $4
+          and ($9::jsonb is null or external_refs @> $9)
         order by embedding <=> $2
         limit $5
         "#,
@@ -436,6 +446,9 @@ pub async fn search_by_embedding(
     .bind(p.min_similarity)
     .bind(fetch_limit)
     .bind(p.memory_types)
+    .bind(p.exclude_invalidated)
+    .bind(p.exclude_retired)
+    .bind(p.ref_filter_json)
     .fetch_all(&mut *tx)
     .await?;
 
@@ -474,16 +487,21 @@ pub async fn search_by_fts(
     limit: i64,
     tags: &[String],
     memory_types: &[String],
+    exclude_invalidated: bool,
+    exclude_retired: bool,
+    ref_filter_json: Option<&serde_json::Value>,
 ) -> Result<Vec<Uuid>> {
     let rows: Vec<(Uuid,)> = sqlx::query_as(
         r#"
         SELECT id
         FROM memories
         WHERE profile = $1
-          AND invalidated_at IS NULL
+          AND (NOT $6 OR invalidated_at IS NULL)
+          AND (NOT $7 OR NOT EXISTS (SELECT 1 FROM derivations WHERE source_id = memories.id))
           AND content_tsvector @@ plainto_tsquery('english', $2)
           AND ($4::text[] = '{}' OR tags && $4)
           AND ($5::text[] = '{}' OR memory_type = ANY($5))
+          AND ($8::jsonb IS NULL OR external_refs @> $8)
         ORDER BY ts_rank(content_tsvector, plainto_tsquery('english', $2)) DESC
         LIMIT $3
         "#,
@@ -493,6 +511,9 @@ pub async fn search_by_fts(
     .bind(limit)
     .bind(tags)
     .bind(memory_types)
+    .bind(exclude_invalidated)
+    .bind(exclude_retired)
+    .bind(ref_filter_json)
     .fetch_all(pool)
     .await?;
     Ok(rows.into_iter().map(|(id,)| id).collect())

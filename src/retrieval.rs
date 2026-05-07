@@ -21,6 +21,9 @@ pub struct HybridSearchParams<'a> {
     pub recency_half_life_days: f32,
     pub search_cfg: &'a SearchConfig,
     pub query_text: &'a str,
+    pub exclude_invalidated: bool,
+    pub exclude_retired: bool,
+    pub ref_filter_json: Option<&'a serde_json::Value>,
 }
 
 #[tracing::instrument(
@@ -44,6 +47,9 @@ pub async fn search_hybrid(
         min_similarity: 0.0,
         recency_weight: 0.0,
         recency_half_life_days: p.recency_half_life_days,
+        exclude_invalidated: p.exclude_invalidated,
+        exclude_retired: p.exclude_retired,
+        ref_filter_json: p.ref_filter_json,
     };
     let dense_fut = db::search_by_embedding(pool, &dense_params);
 
@@ -56,6 +62,9 @@ pub async fn search_hybrid(
                 fetch_limit,
                 p.tags,
                 p.memory_types,
+                p.exclude_invalidated,
+                p.exclude_retired,
+                p.ref_filter_json,
             )
             .await
         } else {

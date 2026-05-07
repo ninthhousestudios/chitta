@@ -82,7 +82,7 @@ impl Config {
         let recency_half_life_days: f32 = parse_env_or("CHITTA_RECENCY_HALF_LIFE_DAYS", 30.0);
 
         let rrf_fts: bool = parse_env_or("CHITTA_RRF_FTS", false);
-        let rrf_sparse: bool = parse_env_or("CHITTA_RRF_SPARSE", false);
+        let rrf_sparse: bool = parse_env_or("CHITTA_RRF_SPARSE", true);
         let rrf_k: u32 = parse_env_or::<u32>("CHITTA_RRF_K", 60).max(1);
         let rrf_candidates: i64 = parse_env_or::<i64>("CHITTA_RRF_CANDIDATES", 5).max(1);
         let dedup_field: Option<String> = std::env::var("CHITTA_DEDUP_FIELD")
@@ -95,14 +95,6 @@ impl Config {
             .filter(|s| !s.is_empty())
             .map(|s| parse_type_weights(&s))
             .unwrap_or_default();
-
-        if rrf_sparse && !rrf_fts {
-            tracing::warn!(
-                "CHITTA_RRF_SPARSE=true without CHITTA_RRF_FTS=true; \
-                 sparse is a re-ranker and needs at least one index-backed leg — \
-                 dense is always on, so this is fine but FTS would add recall"
-            );
-        }
 
         Ok(Self {
             database_url,

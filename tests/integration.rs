@@ -319,6 +319,9 @@ async fn search_envelope_has_four_fields_on_empty_profile() {
             min_similarity: None,
             include_content: None,
             memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
         },
     )
     .await
@@ -375,6 +378,9 @@ async fn search_max_tokens_triggers_truncated_with_honest_total() {
             min_similarity: None,
             include_content: None,
             memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
         },
     )
     .await
@@ -488,6 +494,9 @@ async fn search_snippet_is_verbatim_prefix() {
             min_similarity: None,
             include_content: None,
             memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
         },
     )
     .await
@@ -540,6 +549,9 @@ async fn profile_isolation_keeps_searches_scoped() {
             min_similarity: None,
             include_content: None,
             memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
         },
     )
     .await
@@ -661,6 +673,9 @@ async fn search_finds_stored_memory_by_semantic_similarity() {
             min_similarity: None,
             include_content: None,
             memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
         },
     )
     .await
@@ -1120,6 +1135,9 @@ async fn search_with_tag_filter_returns_only_matching() {
             min_similarity: None,
             include_content: None,
             memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
         },
     )
     .await
@@ -1175,6 +1193,9 @@ async fn search_with_min_similarity_filters_low_scores() {
             min_similarity: Some(0.8),
             include_content: None,
             memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
         },
     )
     .await
@@ -1226,6 +1247,9 @@ async fn truncated_false_when_all_results_fit() {
             min_similarity: None,
             include_content: None,
             memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
         },
     )
     .await
@@ -1372,6 +1396,9 @@ async fn search_memory_types_filter_excludes_non_matching() {
             min_similarity: None,
             include_content: None,
             memory_types: Some(vec!["decision".into()]),
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
         },
     )
     .await
@@ -1452,6 +1479,9 @@ async fn search_returns_score_and_similarity() {
             min_similarity: None,
             include_content: None,
             memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
         },
     )
     .await

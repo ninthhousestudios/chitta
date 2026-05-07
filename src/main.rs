@@ -211,6 +211,9 @@ async fn run_replay(profile: Option<String>, limit: i64) -> Result<()> {
                 min_similarity: entry.min_similarity,
                 recency_weight: 0.0,
                 recency_half_life_days: 30.0,
+                exclude_invalidated: true,
+                exclude_retired: false,
+                ref_filter_json: None,
             },
         )
         .await

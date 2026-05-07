@@ -12,8 +12,9 @@ use crate::error::{ChittaError, Result};
 pub fn profile(tool: &'static str, value: &str) -> Result<()> {
     let char_count = value.chars().count();
     let len_ok = (1..=128).contains(&char_count);
-    let chars_ok =
-        value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    let chars_ok = value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
     if !len_ok || !chars_ok {
         return Err(ChittaError::InvalidArgument {
             tool,
@@ -217,39 +218,70 @@ pub fn memory_types(tool: &'static str, values: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub const VALID_REF_KINDS: &[&str] =
-    &["file", "commit", "yojana_task", "memory", "url", "session"];
+pub const VALID_REF_KINDS: &[&str] = &["file", "commit", "yojana_task", "memory", "url", "session"];
+
+pub fn ref_filter(tool: &'static str, rf: &super::search::RefFilter) -> Result<()> {
+    if !VALID_REF_KINDS.contains(&rf.kind.as_str()) {
+        return Err(ChittaError::InvalidArgument {
+            tool,
+            argument: "ref_filter.kind".to_string(),
+            constraint: format!("kind must be one of: {}", VALID_REF_KINDS.join(", ")),
+            received: Some(json!({"kind": &rf.kind})),
+            next_action: format!("Use a valid kind: {}", VALID_REF_KINDS.join(", ")),
+        });
+    }
+    if let Some(ref val) = rf.ref_value {
+        if val.is_empty() {
+            return Err(ChittaError::InvalidArgument {
+                tool,
+                argument: "ref_filter.ref".to_string(),
+                constraint: "ref must be non-empty when provided".to_string(),
+                received: Some(json!({"ref": ""})),
+                next_action: "Provide a non-empty ref value or omit the field.".to_string(),
+            });
+        }
+    }
+    Ok(())
+}
 
 /// External refs: JSON array of `{"kind": "<type>", "ref": "<value>"}`.
 pub fn external_refs(tool: &'static str, value: &serde_json::Value) -> Result<()> {
-    let arr = value.as_array().ok_or_else(|| ChittaError::InvalidArgument {
-        tool,
-        argument: "external_refs".to_string(),
-        constraint: "must be a JSON array".to_string(),
-        received: Some(json!({"type": value_type_name(value)})),
-        next_action: r#"Pass external_refs as an array: [{"kind": "file", "ref": "path/to/file"}]."#
-            .to_string(),
-    })?;
-    for (i, entry) in arr.iter().enumerate() {
-        let obj = entry.as_object().ok_or_else(|| ChittaError::InvalidArgument {
+    let arr = value
+        .as_array()
+        .ok_or_else(|| ChittaError::InvalidArgument {
             tool,
             argument: "external_refs".to_string(),
-            constraint: "each element must be an object with \"kind\" and \"ref\" string fields"
-                .to_string(),
-            received: Some(json!({"index": i, "type": value_type_name(entry)})),
-            next_action: r#"Each element must be {"kind": "<type>", "ref": "<value>"}."#
-                .to_string(),
+            constraint: "must be a JSON array".to_string(),
+            received: Some(json!({"type": value_type_name(value)})),
+            next_action:
+                r#"Pass external_refs as an array: [{"kind": "file", "ref": "path/to/file"}]."#
+                    .to_string(),
         })?;
-        let kind = obj
-            .get("kind")
-            .and_then(|v| v.as_str())
+    for (i, entry) in arr.iter().enumerate() {
+        let obj = entry
+            .as_object()
             .ok_or_else(|| ChittaError::InvalidArgument {
+                tool,
+                argument: "external_refs".to_string(),
+                constraint:
+                    "each element must be an object with \"kind\" and \"ref\" string fields"
+                        .to_string(),
+                received: Some(json!({"index": i, "type": value_type_name(entry)})),
+                next_action: r#"Each element must be {"kind": "<type>", "ref": "<value>"}."#
+                    .to_string(),
+            })?;
+        let kind = obj.get("kind").and_then(|v| v.as_str()).ok_or_else(|| {
+            ChittaError::InvalidArgument {
                 tool,
                 argument: "external_refs".to_string(),
                 constraint: "each element must have a string \"kind\" field".to_string(),
                 received: Some(json!({"index": i})),
-                next_action: format!("Add a \"kind\" field. Valid kinds: {}", VALID_REF_KINDS.join(", ")),
-            })?;
+                next_action: format!(
+                    "Add a \"kind\" field. Valid kinds: {}",
+                    VALID_REF_KINDS.join(", ")
+                ),
+            }
+        })?;
         if !VALID_REF_KINDS.contains(&kind) {
             return Err(ChittaError::InvalidArgument {
                 tool,

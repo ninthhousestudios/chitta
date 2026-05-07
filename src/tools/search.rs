@@ -30,6 +30,17 @@ const DEFAULT_K: i64 = 10;
 /// Snippet length in chars (not bytes). Verbatim prefix; no ellipsis.
 const SNIPPET_CHARS: usize = 200;
 
+/// Filter by external ref. Only returns memories whose `external_refs`
+/// contain a matching entry.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RefFilter {
+    /// Ref kind. Valid kinds: file, commit, yojana_task, memory, url, session.
+    pub kind: String,
+    /// Ref value. When provided, only matches refs with this exact value.
+    #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub ref_value: Option<String>,
+}
+
 /// Arguments for `search_memories`. `JsonSchema` is derived so rmcp exposes
 /// the same shape callers use on the wire.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -57,6 +68,15 @@ pub struct SearchArgs {
     /// Valid types: memory, observation, decision, session_summary, mental_model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_types: Option<Vec<String>>,
+    /// Exclude soft-deleted memories. Default true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude_invalidated: Option<bool>,
+    /// Exclude retired memories (superseded by a derivation). Default true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude_retired: Option<bool>,
+    /// Filter by external ref kind and optionally value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ref_filter: Option<RefFilter>,
 }
 
 #[derive(Debug, Serialize)]
@@ -105,8 +125,13 @@ pub async fn handle(
         min_similarity,
         include_content,
         memory_types,
+        exclude_invalidated,
+        exclude_retired,
+        ref_filter,
     } = args;
     let include_content = include_content.unwrap_or(false);
+    let exclude_invalidated = exclude_invalidated.unwrap_or(true);
+    let exclude_retired = exclude_retired.unwrap_or(true);
 
     validate::profile(TOOL, &profile)?;
     validate::content_byte_length(TOOL, &query)?;
@@ -132,6 +157,17 @@ pub async fn handle(
     let min_similarity = min_similarity.unwrap_or(0.0);
     validate::min_similarity(TOOL, min_similarity)?;
 
+    let ref_filter_json = if let Some(ref rf) = ref_filter {
+        validate::ref_filter(TOOL, rf)?;
+        let mut obj = serde_json::json!({"kind": rf.kind});
+        if let Some(ref val) = rf.ref_value {
+            obj["ref"] = serde_json::json!(val);
+        }
+        Some(serde_json::json!([obj]))
+    } else {
+        None
+    };
+
     let use_hybrid = search_cfg.rrf_fts || search_cfg.rrf_sparse;
     let fetch_k = if search_cfg.dedup_field.is_some() {
         k * search_cfg.dedup_fetch_factor
@@ -155,6 +191,9 @@ pub async fn handle(
                 recency_half_life_days: search_cfg.recency_half_life_days,
                 search_cfg,
                 query_text: &query,
+                exclude_invalidated,
+                exclude_retired,
+                ref_filter_json: ref_filter_json.as_ref(),
             },
         )
         .await?
@@ -170,6 +209,9 @@ pub async fn handle(
                 min_similarity,
                 recency_weight: search_cfg.recency_weight,
                 recency_half_life_days: search_cfg.recency_half_life_days,
+                exclude_invalidated,
+                exclude_retired,
+                ref_filter_json: ref_filter_json.as_ref(),
             },
         )
         .await?
