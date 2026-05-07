@@ -456,8 +456,7 @@ async fn serve_http(
         Arc::clone(&embedder),
     ));
 
-    #[allow(deprecated)]
-    let app = axum::Router::new()
+    let authed = axum::Router::new()
         .route("/mcp", any_service(mcp_service))
         .route(
             "/ingest",
@@ -465,6 +464,22 @@ async fn serve_http(
         )
         .layer(normalize_accept)
         .layer(ValidateRequestHeaderLayer::bearer(&bearer_token));
+
+    let health_pool = pool.clone();
+    #[allow(deprecated)]
+    let app = axum::Router::new()
+        .route(
+            "/health",
+            axum::routing::get(move || async move {
+                let ok = sqlx::query_scalar::<_, i32>("SELECT 1")
+                    .fetch_one(&health_pool)
+                    .await
+                    .is_ok();
+                let status = if ok { "ok" } else { "degraded" };
+                axum::Json(serde_json::json!({ "status": status }))
+            }),
+        )
+        .merge(authed);
 
     let addr = format!("{http_addr}:{http_port}");
     let listener = tokio::net::TcpListener::bind(&addr)
