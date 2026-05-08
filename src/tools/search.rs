@@ -41,6 +41,26 @@ pub struct RefFilter {
     pub ref_value: Option<String>,
 }
 
+/// Context-faceted filter. Each supplied facet intersects with the row's
+/// corresponding `applies_to_*` column via array containment (`@>`).
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct AppliesTo {
+    /// Filter by domain facet (e.g. "rust", "astrology").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domains: Option<Vec<String>>,
+    /// Filter by skill facet (e.g. "review", "reflect").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills: Option<Vec<String>>,
+    /// Filter by project facet (e.g. "chitta", "sutra").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projects: Option<Vec<String>>,
+    /// Filter by situation facet (e.g. "debugging", "planning").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub situations: Option<Vec<String>>,
+}
+
+const CONSOLIDATED_TYPES: &[&str] = &["trait", "value", "pattern", "preference", "mental_model"];
+
 /// Arguments for `search_memories`. `JsonSchema` is derived so rmcp exposes
 /// the same shape callers use on the wire.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -77,6 +97,14 @@ pub struct SearchArgs {
     /// Filter by external ref kind and optionally value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ref_filter: Option<RefFilter>,
+    /// Context-faceted retrieval. Each supplied facet intersects with the row's
+    /// `applies_to_*` column via array containment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applies_to: Option<AppliesTo>,
+    /// Include raw-layer types (observation, episode, decision). Default false.
+    /// When false and `memory_types` is unset, only consolidated types are returned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_raw: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -130,10 +158,14 @@ pub async fn handle(
         exclude_invalidated,
         exclude_retired,
         ref_filter,
+        applies_to,
+        include_raw,
     } = args;
     let include_content = include_content.unwrap_or(false);
     let exclude_invalidated = exclude_invalidated.unwrap_or(true);
     let exclude_retired = exclude_retired.unwrap_or(true);
+    let include_raw = include_raw.unwrap_or(false);
+    let applies_to = applies_to.unwrap_or_default();
 
     validate::profile(TOOL, &profile)?;
     validate::content_byte_length(TOOL, &query)?;
@@ -154,7 +186,11 @@ pub async fn handle(
     }
     let tags = tags.unwrap_or_default();
     validate::tags(TOOL, &tags)?;
-    let memory_types = memory_types.unwrap_or_default();
+    let memory_types = match memory_types {
+        Some(mt) if !mt.is_empty() => mt,
+        _ if include_raw => vec![],
+        _ => CONSOLIDATED_TYPES.iter().map(|s| s.to_string()).collect(),
+    };
     validate::memory_types(TOOL, &memory_types)?;
     let min_similarity = min_similarity.unwrap_or(0.0);
     validate::min_similarity(TOOL, min_similarity)?;
@@ -177,6 +213,11 @@ pub async fn handle(
         k
     };
 
+    let at_domains = applies_to.domains.unwrap_or_default();
+    let at_skills = applies_to.skills.unwrap_or_default();
+    let at_projects = applies_to.projects.unwrap_or_default();
+    let at_situations = applies_to.situations.unwrap_or_default();
+
     let embed_out = embedder.embed_full(&query, "search_memories").await?;
     let query_vec = Vector::from(embed_out.dense.clone());
 
@@ -196,6 +237,10 @@ pub async fn handle(
                 exclude_invalidated,
                 exclude_retired,
                 ref_filter_json: ref_filter_json.as_ref(),
+                applies_to_domains: &at_domains,
+                applies_to_skills: &at_skills,
+                applies_to_projects: &at_projects,
+                applies_to_situations: &at_situations,
             },
         )
         .await?
@@ -214,6 +259,10 @@ pub async fn handle(
                 exclude_invalidated,
                 exclude_retired,
                 ref_filter_json: ref_filter_json.as_ref(),
+                applies_to_domains: &at_domains,
+                applies_to_skills: &at_skills,
+                applies_to_projects: &at_projects,
+                applies_to_situations: &at_situations,
             },
         )
         .await?

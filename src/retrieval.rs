@@ -24,6 +24,10 @@ pub struct HybridSearchParams<'a> {
     pub exclude_invalidated: bool,
     pub exclude_retired: bool,
     pub ref_filter_json: Option<&'a serde_json::Value>,
+    pub applies_to_domains: &'a [String],
+    pub applies_to_skills: &'a [String],
+    pub applies_to_projects: &'a [String],
+    pub applies_to_situations: &'a [String],
 }
 
 #[tracing::instrument(
@@ -50,6 +54,10 @@ pub async fn search_hybrid(
         exclude_invalidated: p.exclude_invalidated,
         exclude_retired: p.exclude_retired,
         ref_filter_json: p.ref_filter_json,
+        applies_to_domains: p.applies_to_domains,
+        applies_to_skills: p.applies_to_skills,
+        applies_to_projects: p.applies_to_projects,
+        applies_to_situations: p.applies_to_situations,
     };
     let dense_fut = db::search_by_embedding(pool, &dense_params);
 

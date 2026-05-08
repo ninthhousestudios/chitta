@@ -86,6 +86,10 @@ pub struct SearchParams<'a> {
     pub exclude_invalidated: bool,
     pub exclude_retired: bool,
     pub ref_filter_json: Option<&'a serde_json::Value>,
+    pub applies_to_domains: &'a [String],
+    pub applies_to_skills: &'a [String],
+    pub applies_to_projects: &'a [String],
+    pub applies_to_situations: &'a [String],
 }
 
 pub struct QueryLogInput<'a> {
@@ -407,10 +411,14 @@ pub async fn search_by_embedding(
         from memories
         where profile = $1
           and (not $4 or invalidated_at is null)
-          and (not $5 or not exists (select 1 from derivations where source_id = memories.id))
+          and (not $5 or superseded_by is null)
           and ($2::text[] = '{}' or tags && $2)
           and ($3::text[] = '{}' or memory_type = ANY($3))
           and ($6::jsonb is null or external_refs @> $6)
+          and ($7::text[] = '{}' or applies_to_domains @> $7)
+          and ($8::text[] = '{}' or applies_to_skills @> $8)
+          and ($9::text[] = '{}' or applies_to_projects @> $9)
+          and ($10::text[] = '{}' or applies_to_situations @> $10)
         "#,
     )
     .bind(p.profile)
@@ -419,6 +427,10 @@ pub async fn search_by_embedding(
     .bind(p.exclude_invalidated)
     .bind(p.exclude_retired)
     .bind(p.ref_filter_json)
+    .bind(p.applies_to_domains)
+    .bind(p.applies_to_skills)
+    .bind(p.applies_to_projects)
+    .bind(p.applies_to_situations)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -446,11 +458,15 @@ pub async fn search_by_embedding(
         from memories
         where profile = $1
           and (not $7 or invalidated_at is null)
-          and (not $8 or not exists (select 1 from derivations where source_id = memories.id))
+          and (not $8 or superseded_by is null)
           and ($3::text[] = '{}' or tags && $3)
           and ($6::text[] = '{}' or memory_type = ANY($6))
           and (1.0 - (embedding <=> $2))::real >= $4
           and ($9::jsonb is null or external_refs @> $9)
+          and ($10::text[] = '{}' or applies_to_domains @> $10)
+          and ($11::text[] = '{}' or applies_to_skills @> $11)
+          and ($12::text[] = '{}' or applies_to_projects @> $12)
+          and ($13::text[] = '{}' or applies_to_situations @> $13)
         order by embedding <=> $2
         limit $5
         "#,
@@ -464,6 +480,10 @@ pub async fn search_by_embedding(
     .bind(p.exclude_invalidated)
     .bind(p.exclude_retired)
     .bind(p.ref_filter_json)
+    .bind(p.applies_to_domains)
+    .bind(p.applies_to_skills)
+    .bind(p.applies_to_projects)
+    .bind(p.applies_to_situations)
     .fetch_all(&mut *tx)
     .await?;
 

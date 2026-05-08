@@ -28,7 +28,9 @@ use chitta::config::{Config, SearchConfig};
 use chitta::db;
 use chitta::embedding::Embedder;
 use chitta::error::ChittaError;
-use chitta::tools::{self, DeleteArgs, GetArgs, ListArgs, SearchArgs, StoreArgs, UpdateArgs};
+use chitta::tools::{
+    self, AppliesTo, DeleteArgs, GetArgs, ListArgs, SearchArgs, StoreArgs, UpdateArgs,
+};
 use sqlx::PgPool;
 use tokio::sync::OnceCell;
 use uuid::Uuid;
@@ -336,6 +338,8 @@ async fn search_envelope_has_four_fields_on_empty_profile() {
             exclude_invalidated: None,
             exclude_retired: None,
             ref_filter: None,
+            applies_to: None,
+            include_raw: None,
         },
     )
     .await
@@ -402,6 +406,8 @@ async fn search_max_tokens_triggers_truncated_with_honest_total() {
             exclude_invalidated: None,
             exclude_retired: None,
             ref_filter: None,
+            applies_to: None,
+            include_raw: None,
         },
     )
     .await
@@ -532,6 +538,8 @@ async fn search_snippet_is_verbatim_prefix() {
             exclude_invalidated: None,
             exclude_retired: None,
             ref_filter: None,
+            applies_to: None,
+            include_raw: None,
         },
     )
     .await
@@ -594,6 +602,8 @@ async fn profile_isolation_keeps_searches_scoped() {
             exclude_invalidated: None,
             exclude_retired: None,
             ref_filter: None,
+            applies_to: None,
+            include_raw: None,
         },
     )
     .await
@@ -739,6 +749,8 @@ async fn search_finds_stored_memory_by_semantic_similarity() {
             exclude_invalidated: None,
             exclude_retired: None,
             ref_filter: None,
+            applies_to: None,
+            include_raw: None,
         },
     )
     .await
@@ -1260,6 +1272,8 @@ async fn search_with_tag_filter_returns_only_matching() {
             exclude_invalidated: None,
             exclude_retired: None,
             ref_filter: None,
+            applies_to: None,
+            include_raw: None,
         },
     )
     .await
@@ -1325,6 +1339,8 @@ async fn search_with_min_similarity_filters_low_scores() {
             exclude_invalidated: None,
             exclude_retired: None,
             ref_filter: None,
+            applies_to: None,
+            include_raw: None,
         },
     )
     .await
@@ -1386,6 +1402,8 @@ async fn truncated_false_when_all_results_fit() {
             exclude_invalidated: None,
             exclude_retired: None,
             ref_filter: None,
+            applies_to: None,
+            include_raw: None,
         },
     )
     .await
@@ -1556,6 +1574,8 @@ async fn search_memory_types_filter_excludes_non_matching() {
             exclude_invalidated: None,
             exclude_retired: None,
             ref_filter: None,
+            applies_to: None,
+            include_raw: None,
         },
     )
     .await
@@ -1653,6 +1673,8 @@ async fn search_returns_score_and_similarity() {
             exclude_invalidated: None,
             exclude_retired: None,
             ref_filter: None,
+            applies_to: None,
+            include_raw: None,
         },
     )
     .await
@@ -1901,4 +1923,529 @@ async fn episode_derivation_invalid_source_id_rolls_back() {
         check.is_none(),
         "episode row should be rolled back when derivation FK fails"
     );
+}
+
+// ---- search_memories refinement: applies_to, include_raw, supersession ----
+
+#[tokio::test]
+async fn search_default_excludes_raw_types() {
+    let h = require_harness!("default_consolidated");
+
+    // Store one consolidated and one raw memory.
+    for (key, content, mt) in [
+        ("dc-1", "Josh values clean interfaces above all.", "preference"),
+        ("dc-2", "Josh said he prefers small PRs today.", "observation"),
+    ] {
+        tools::store::handle(
+            &h.pool,
+            h.embedder.clone(),
+            StoreArgs {
+                profile: h.profile.clone(),
+                content: content.into(),
+                idempotency_key: key.into(),
+                event_time: None,
+                tags: None,
+                metadata: None,
+                memory_type: Some(mt.into()),
+                external_refs: None,
+                applies_to_domains: None,
+                applies_to_skills: None,
+                applies_to_projects: None,
+                applies_to_situations: None,
+                confidence: None,
+                source: None,
+                derivations: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    // Default search (no include_raw) should only return consolidated types.
+    let out = tools::search::handle(
+        &h.pool,
+        h.embedder.clone(),
+        false,
+        &test_search_cfg(),
+        SearchArgs {
+            profile: h.profile.clone(),
+            query: "Josh preferences interfaces PRs".into(),
+            k: Some(10),
+            max_tokens: None,
+            tags: None,
+            min_similarity: None,
+            include_content: None,
+            memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
+            applies_to: None,
+            include_raw: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    for hit in &out.results {
+        assert!(
+            ["trait", "value", "pattern", "preference", "mental_model"].contains(&hit.memory_type.as_str()),
+            "default search should only return consolidated types, got: {}",
+            hit.memory_type
+        );
+    }
+    assert!(!out.results.is_empty(), "should find at least one result");
+}
+
+#[tokio::test]
+async fn search_include_raw_returns_all_types() {
+    let h = require_harness!("include_raw");
+
+    for (key, content, mt) in [
+        ("ir-1", "Josh values clean code and small functions.", "preference"),
+        ("ir-2", "Josh mentioned he dislikes large monolithic commits.", "observation"),
+    ] {
+        tools::store::handle(
+            &h.pool,
+            h.embedder.clone(),
+            StoreArgs {
+                profile: h.profile.clone(),
+                content: content.into(),
+                idempotency_key: key.into(),
+                event_time: None,
+                tags: None,
+                metadata: None,
+                memory_type: Some(mt.into()),
+                external_refs: None,
+                applies_to_domains: None,
+                applies_to_skills: None,
+                applies_to_projects: None,
+                applies_to_situations: None,
+                confidence: None,
+                source: None,
+                derivations: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    let out = tools::search::handle(
+        &h.pool,
+        h.embedder.clone(),
+        false,
+        &test_search_cfg(),
+        SearchArgs {
+            profile: h.profile.clone(),
+            query: "Josh code commits functions".into(),
+            k: Some(10),
+            max_tokens: None,
+            tags: None,
+            min_similarity: None,
+            include_content: None,
+            memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
+            applies_to: None,
+            include_raw: Some(true),
+        },
+    )
+    .await
+    .unwrap();
+
+    let types: Vec<&str> = out.results.iter().map(|h| h.memory_type.as_str()).collect();
+    assert!(
+        types.contains(&"observation"),
+        "include_raw=true should return raw types too, got: {types:?}"
+    );
+}
+
+#[tokio::test]
+async fn search_applies_to_single_facet() {
+    let h = require_harness!("at_single");
+
+    // One memory tagged with domain "rust", one without.
+    tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh prefers explicit error handling over panics.".into(),
+            idempotency_key: "at1-1".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("preference".into()),
+            external_refs: None,
+            applies_to_domains: Some(vec!["rust".into()]),
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh prefers explicit typing over inference.".into(),
+            idempotency_key: "at1-2".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("preference".into()),
+            external_refs: None,
+            applies_to_domains: Some(vec!["python".into()]),
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Search with applies_to domains=["rust"] should only get the rust one.
+    let out = tools::search::handle(
+        &h.pool,
+        h.embedder.clone(),
+        false,
+        &test_search_cfg(),
+        SearchArgs {
+            profile: h.profile.clone(),
+            query: "Josh preferences error handling typing".into(),
+            k: Some(10),
+            max_tokens: None,
+            tags: None,
+            min_similarity: None,
+            include_content: Some(true),
+            memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
+            applies_to: Some(AppliesTo {
+                domains: Some(vec!["rust".into()]),
+                skills: None,
+                projects: None,
+                situations: None,
+            }),
+            include_raw: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(!out.results.is_empty(), "should find the rust preference");
+    for hit in &out.results {
+        let content = hit.content.as_deref().unwrap_or(&hit.snippet);
+        assert!(
+            content.contains("panics") || content.contains("error handling"),
+            "single-facet filter should only return rust-domain memories"
+        );
+    }
+}
+
+#[tokio::test]
+async fn search_applies_to_multi_facet_intersection() {
+    let h = require_harness!("at_multi");
+
+    // Memory with both domain=rust AND skill=review.
+    tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh wants code reviews to focus on correctness not style.".into(),
+            idempotency_key: "atm-1".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("preference".into()),
+            external_refs: None,
+            applies_to_domains: Some(vec!["rust".into()]),
+            applies_to_skills: Some(vec!["review".into()]),
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Memory with domain=rust but skill=planning (not review).
+    tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh likes to plan Rust modules with deep interfaces.".into(),
+            idempotency_key: "atm-2".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("preference".into()),
+            external_refs: None,
+            applies_to_domains: Some(vec!["rust".into()]),
+            applies_to_skills: Some(vec!["planning".into()]),
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Search with applies_to {domains: ["rust"], skills: ["review"]} — intersection.
+    let out = tools::search::handle(
+        &h.pool,
+        h.embedder.clone(),
+        false,
+        &test_search_cfg(),
+        SearchArgs {
+            profile: h.profile.clone(),
+            query: "Josh preferences code modules review planning".into(),
+            k: Some(10),
+            max_tokens: None,
+            tags: None,
+            min_similarity: None,
+            include_content: Some(true),
+            memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
+            applies_to: Some(AppliesTo {
+                domains: Some(vec!["rust".into()]),
+                skills: Some(vec!["review".into()]),
+                projects: None,
+                situations: None,
+            }),
+            include_raw: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(!out.results.is_empty(), "should find the review+rust memory");
+    for hit in &out.results {
+        let content = hit.content.as_deref().unwrap_or(&hit.snippet);
+        assert!(
+            content.contains("correctness"),
+            "multi-facet intersection should only return the rust+review memory, got: {content}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn search_excludes_superseded_by_default() {
+    let h = require_harness!("superseded");
+
+    // Store a memory, then mark it superseded.
+    let first = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh prefers tabs over spaces in all contexts.".into(),
+            idempotency_key: "sup-1".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("preference".into()),
+            external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let second = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh now prefers spaces over tabs universally.".into(),
+            idempotency_key: "sup-2".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("preference".into()),
+            external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Mark first as superseded by second.
+    sqlx::query("UPDATE memories SET superseded_by = $1 WHERE id = $2")
+        .bind(second.id)
+        .bind(first.id)
+        .execute(&h.pool)
+        .await
+        .unwrap();
+
+    // Default search should NOT return the superseded memory.
+    let out = tools::search::handle(
+        &h.pool,
+        h.embedder.clone(),
+        false,
+        &test_search_cfg(),
+        SearchArgs {
+            profile: h.profile.clone(),
+            query: "tabs spaces preference".into(),
+            k: Some(10),
+            max_tokens: None,
+            tags: None,
+            min_similarity: None,
+            include_content: Some(true),
+            memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
+            applies_to: None,
+            include_raw: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let ids: Vec<Uuid> = out.results.iter().map(|h| h.id).collect();
+    assert!(
+        !ids.contains(&first.id),
+        "superseded memory should be excluded from default search"
+    );
+    assert!(
+        ids.contains(&second.id),
+        "non-superseded memory should still appear"
+    );
+}
+
+#[tokio::test]
+async fn search_excludes_invalidated_by_default() {
+    let h = require_harness!("invalidated");
+
+    let stored = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh strongly dislikes dynamic typing.".into(),
+            idempotency_key: "inv-1".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("preference".into()),
+            external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Soft-delete it.
+    tools::delete::handle(
+        &h.pool,
+        DeleteArgs {
+            profile: h.profile.clone(),
+            id: stored.id.to_string(),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Default search should not find it.
+    let out = tools::search::handle(
+        &h.pool,
+        h.embedder.clone(),
+        false,
+        &test_search_cfg(),
+        SearchArgs {
+            profile: h.profile.clone(),
+            query: "dynamic typing".into(),
+            k: Some(10),
+            max_tokens: None,
+            tags: None,
+            min_similarity: None,
+            include_content: None,
+            memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
+            applies_to: None,
+            include_raw: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let ids: Vec<Uuid> = out.results.iter().map(|h| h.id).collect();
+    assert!(
+        !ids.contains(&stored.id),
+        "invalidated memory should be excluded from default search"
+    );
+}
+
+#[tokio::test]
+async fn applies_to_uses_gin_index() {
+    let h = require_harness!("gin_plan");
+
+    // On small tables the planner may choose a seq scan over the GIN index.
+    // We verify the indexes exist by checking pg_indexes directly.
+    let index_exists: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM pg_indexes
+            WHERE tablename = 'memories'
+              AND indexname = 'memories_applies_to_domains_idx'
+        )
+        "#,
+    )
+    .fetch_one(&h.pool)
+    .await
+    .unwrap();
+
+    assert!(index_exists, "GIN index on applies_to_domains must exist");
+
+    // Also verify the other three facet indexes exist.
+    for col in ["skills", "projects", "situations"] {
+        let idx_name = format!("memories_applies_to_{col}_idx");
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename = 'memories' AND indexname = $1)",
+        )
+        .bind(&idx_name)
+        .fetch_one(&h.pool)
+        .await
+        .unwrap();
+        assert!(exists, "GIN index {idx_name} must exist");
+    }
 }

@@ -8,8 +8,9 @@
 use chitta::envelope::Envelope;
 use chitta::error::{ChittaError, codes};
 use chitta::tools::{
-    DerivationInput, DeleteArgs, DeleteOutput, GetArgs, GetOutput, ListArgs, ListItem, ListOutput,
-    SearchArgs, SearchHit, SearchOutput, StoreArgs, StoreOutput, UpdateArgs, UpdateOutput,
+    AppliesTo, DerivationInput, DeleteArgs, DeleteOutput, GetArgs, GetOutput, ListArgs, ListItem,
+    ListOutput, SearchArgs, SearchHit, SearchOutput, StoreArgs, StoreOutput, UpdateArgs,
+    UpdateOutput,
 };
 use serde_json::{Value, json};
 
@@ -584,6 +585,70 @@ fn store_args_episode_empty_derivations() {
     });
     let args: StoreArgs = serde_json::from_value(v).unwrap();
     assert_eq!(args.derivations.unwrap().len(), 0);
+}
+
+// ---- search_memories: applies_to + include_raw (wire shape) -----------
+
+#[test]
+fn search_args_accepts_applies_to() {
+    let v = json!({
+        "profile": "josh",
+        "query": "how does Josh debug?",
+        "applies_to": {
+            "domains": ["rust"],
+            "skills": ["review"]
+        }
+    });
+    let args: SearchArgs = serde_json::from_value(v).unwrap();
+    let at = args.applies_to.unwrap();
+    assert_eq!(at.domains.unwrap(), vec!["rust"]);
+    assert_eq!(at.skills.unwrap(), vec!["review"]);
+    assert!(at.projects.is_none());
+    assert!(at.situations.is_none());
+}
+
+#[test]
+fn search_args_applies_to_all_four_facets() {
+    let v = json!({
+        "profile": "josh",
+        "query": "preferences",
+        "applies_to": {
+            "domains": ["rust"],
+            "skills": ["review"],
+            "projects": ["chitta"],
+            "situations": ["debugging"]
+        }
+    });
+    let args: SearchArgs = serde_json::from_value(v).unwrap();
+    let at = args.applies_to.unwrap();
+    assert_eq!(at.domains.unwrap(), vec!["rust"]);
+    assert_eq!(at.skills.unwrap(), vec!["review"]);
+    assert_eq!(at.projects.unwrap(), vec!["chitta"]);
+    assert_eq!(at.situations.unwrap(), vec!["debugging"]);
+}
+
+#[test]
+fn search_args_applies_to_empty_object_ok() {
+    let v = json!({"profile": "josh", "query": "q", "applies_to": {}});
+    let args: SearchArgs = serde_json::from_value(v).unwrap();
+    let at = args.applies_to.unwrap();
+    assert!(at.domains.is_none());
+    assert!(at.skills.is_none());
+}
+
+#[test]
+fn search_args_accepts_include_raw() {
+    let v = json!({"profile": "josh", "query": "q", "include_raw": true});
+    let args: SearchArgs = serde_json::from_value(v).unwrap();
+    assert_eq!(args.include_raw, Some(true));
+}
+
+#[test]
+fn search_args_include_raw_defaults_to_none() {
+    let v = json!({"profile": "josh", "query": "q"});
+    let args: SearchArgs = serde_json::from_value(v).unwrap();
+    assert!(args.include_raw.is_none());
+    assert!(args.applies_to.is_none());
 }
 
 #[test]

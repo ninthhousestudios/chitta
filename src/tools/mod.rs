@@ -16,6 +16,6 @@ pub use delete::{DeleteArgs, DeleteOutput};
 pub use get::{GetArgs, GetOutput};
 pub use health::{HealthArgs, HealthOutput};
 pub use list::{ListArgs, ListItem, ListOutput};
-pub use search::{SearchArgs, SearchHit, SearchOutput};
+pub use search::{AppliesTo, SearchArgs, SearchHit, SearchOutput};
 pub use store::{DerivationInput, StoreArgs, StoreOutput};
 pub use update::{UpdateArgs, UpdateOutput};
