@@ -235,6 +235,7 @@ async fn idempotent_replay_returns_same_row() {
         applies_to_projects: None,
         applies_to_situations: None,
         confidence: None,
+        source: None,
     };
 
     let first = tools::store::handle(&h.pool, h.embedder.clone(), args())
@@ -290,6 +291,7 @@ async fn verbatim_roundtrip_preserves_unicode_and_whitespace() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -372,6 +374,7 @@ async fn search_max_tokens_triggers_truncated_with_honest_total() {
                 applies_to_projects: None,
                 applies_to_situations: None,
                 confidence: None,
+        source: None,
             },
         )
         .await
@@ -439,6 +442,7 @@ async fn error_contract_invalid_event_time_populates_next_action() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -500,6 +504,7 @@ async fn search_snippet_is_verbatim_prefix() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -560,6 +565,7 @@ async fn profile_isolation_keeps_searches_scoped() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -615,6 +621,7 @@ async fn content_too_long_rejected_with_token_count() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -650,6 +657,7 @@ async fn concurrent_duplicate_writes_converge_on_one_row() {
         applies_to_projects: None,
         applies_to_situations: None,
         confidence: None,
+        source: None,
     };
 
     let (a, b) = tokio::join!(
@@ -699,6 +707,7 @@ async fn search_finds_stored_memory_by_semantic_similarity() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -762,6 +771,7 @@ async fn update_memory_content_reembeds() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -821,6 +831,7 @@ async fn update_memory_tags_only_no_reembed() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -931,6 +942,7 @@ async fn soft_delete_hides_memory() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -988,6 +1000,7 @@ async fn restore_after_soft_delete_creates_new_row() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -1022,6 +1035,7 @@ async fn restore_after_soft_delete_creates_new_row() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -1077,6 +1091,7 @@ async fn list_recent_returns_time_ordered() {
                 applies_to_projects: None,
                 applies_to_situations: None,
                 confidence: None,
+        source: None,
             },
         )
         .await
@@ -1131,6 +1146,7 @@ async fn list_recent_respects_limit() {
                 applies_to_projects: None,
                 applies_to_situations: None,
                 confidence: None,
+        source: None,
             },
         )
         .await
@@ -1179,6 +1195,7 @@ async fn search_with_tag_filter_returns_only_matching() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -1202,6 +1219,7 @@ async fn search_with_tag_filter_returns_only_matching() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -1265,6 +1283,7 @@ async fn search_with_min_similarity_filters_low_scores() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -1323,6 +1342,7 @@ async fn truncated_false_when_all_results_fit() {
                 applies_to_projects: None,
                 applies_to_situations: None,
                 confidence: None,
+        source: None,
             },
         )
         .await
@@ -1382,6 +1402,7 @@ async fn get_memory_cross_profile_isolation() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -1432,6 +1453,7 @@ async fn store_with_non_default_memory_type_roundtrips() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -1487,6 +1509,7 @@ async fn search_memory_types_filter_excludes_non_matching() {
                 applies_to_projects: None,
                 applies_to_situations: None,
                 confidence: None,
+        source: None,
             },
         )
         .await
@@ -1546,6 +1569,7 @@ async fn invalid_memory_type_store_rejected() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await
@@ -1581,6 +1605,7 @@ async fn search_returns_score_and_similarity() {
             applies_to_projects: None,
             applies_to_situations: None,
             confidence: None,
+        source: None,
         },
     )
     .await

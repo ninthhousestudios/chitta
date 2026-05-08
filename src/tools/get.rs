@@ -37,6 +37,8 @@ pub struct GetOutput {
     pub metadata: Option<serde_json::Value>,
     pub memory_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub external_refs: Option<serde_json::Value>,
     pub applies_to_domains: Vec<String>,
     pub applies_to_skills: Vec<String>,
@@ -79,6 +81,7 @@ pub async fn handle(pool: &PgPool, args: GetArgs) -> Result<GetOutput> {
         tags: row.tags,
         metadata: row.metadata,
         memory_type: row.memory_type,
+        source: row.source,
         external_refs: row.external_refs,
         applies_to_domains: row.applies_to_domains,
         applies_to_skills: row.applies_to_skills,

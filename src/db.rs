@@ -26,6 +26,7 @@ pub struct MemoryRow {
     pub event_time: DateTime<Utc>,
     pub record_time: DateTime<Utc>,
     pub idempotency_key: String,
+    pub source: Option<String>,
     pub memory_type: String,
     pub tags: Vec<String>,
     pub external_refs: Option<serde_json::Value>,
@@ -54,6 +55,7 @@ pub struct SearchHit {
     pub similarity: f32,
     #[sqlx(default)]
     pub score: f32,
+    pub source: Option<String>,
     pub metadata: Option<serde_json::Value>,
     pub memory_type: String,
     pub external_refs: Option<serde_json::Value>,
@@ -129,11 +131,11 @@ pub async fn insert_or_fetch_memory(pool: &PgPool, new: &MemoryRow) -> Result<(M
         r#"
         INSERT INTO memories
             (id, profile, content, embedding, sparse_embedding,
-             event_time, record_time, idempotency_key, memory_type,
+             event_time, record_time, idempotency_key, source, memory_type,
              tags, external_refs, metadata,
              applies_to_domains, applies_to_skills, applies_to_projects, applies_to_situations,
              superseded_by, confidence, reinforcement_count, last_reinforced_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
         RETURNING *
         "#,
     )
@@ -145,6 +147,7 @@ pub async fn insert_or_fetch_memory(pool: &PgPool, new: &MemoryRow) -> Result<(M
     .bind(new.event_time)
     .bind(new.record_time)
     .bind(&new.idempotency_key)
+    .bind(&new.source)
     .bind(&new.memory_type)
     .bind(&new.tags)
     .bind(&new.external_refs)
@@ -435,6 +438,7 @@ pub async fn search_by_embedding(
             record_time,
             tags,
             (1.0 - (embedding <=> $2))::real as similarity,
+            source,
             metadata,
             memory_type,
             external_refs,
@@ -534,7 +538,7 @@ pub async fn fetch_search_hits_by_ids(
     let rows = sqlx::query_as::<_, SearchHit>(
         r#"
         SELECT id, content, event_time, record_time, tags,
-               1.0::real AS similarity, metadata, memory_type, external_refs, confidence
+               1.0::real AS similarity, source, metadata, memory_type, external_refs, confidence
         FROM memories
         WHERE profile = $1
           AND invalidated_at IS NULL

@@ -93,6 +93,7 @@ fn store_output_wire_keys() {
         applies_to_projects: vec![],
         applies_to_situations: vec![],
         confidence: None,
+        source: None,
         idempotent_replay: false,
     };
     let v = serde_json::to_value(&out).unwrap();
@@ -125,6 +126,7 @@ fn get_output_wire_keys() {
         tags: vec!["x".into()],
         metadata: None,
         memory_type: "observation".into(),
+        source: None,
         external_refs: None,
         applies_to_domains: vec![],
         applies_to_skills: vec![],
@@ -164,6 +166,7 @@ fn search_output_envelope_shape() {
         content: None,
         metadata: None,
         memory_type: "observation".into(),
+        source: None,
         external_refs: None,
         confidence: None,
     };
@@ -498,6 +501,7 @@ fn list_output_wire_keys() {
         record_time: t,
         tags: vec!["t".into()],
         memory_type: "observation".into(),
+        source: None,
         external_refs: None,
         confidence: None,
     };

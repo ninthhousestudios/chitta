@@ -94,6 +94,8 @@ pub struct SearchHit {
     pub metadata: Option<serde_json::Value>,
     pub memory_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub external_refs: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
@@ -245,6 +247,7 @@ pub async fn handle(
             },
             metadata: if include_content { hit.metadata } else { None },
             memory_type: hit.memory_type,
+            source: hit.source,
             external_refs: hit.external_refs,
             confidence: hit.confidence,
         })
@@ -412,6 +415,7 @@ mod tests {
             content: None,
             metadata: None,
             memory_type: "observation".to_string(),
+            source: None,
             external_refs: None,
             confidence: None,
         }

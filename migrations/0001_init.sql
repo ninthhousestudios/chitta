@@ -12,6 +12,7 @@ create table memories (
     event_time            timestamptz  not null,
     record_time           timestamptz  not null default now(),
     idempotency_key       text         not null,
+    source                text,
     memory_type           text         not null
         check (memory_type in (
             'observation', 'episode', 'decision',

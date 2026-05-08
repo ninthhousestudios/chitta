@@ -245,6 +245,7 @@ async fn process_item(
             event_time: now,
             record_time: now,
             idempotency_key: idem_key,
+            source: Some(item.source.clone()),
             memory_type: best_type.to_string(),
             tags: build_tags(item.project.as_deref(), &item.source),
             external_refs: None,

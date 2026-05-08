@@ -51,6 +51,8 @@ pub struct ListItem {
     pub tags: Vec<String>,
     pub memory_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub external_refs: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
@@ -100,6 +102,7 @@ pub async fn handle(pool: &PgPool, args: ListArgs) -> Result<ListOutput> {
             record_time: row.record_time,
             tags: row.tags,
             memory_type: row.memory_type,
+            source: row.source,
             external_refs: row.external_refs,
             confidence: row.confidence,
         })

@@ -63,6 +63,9 @@ pub struct StoreArgs {
     /// Confidence score (0.0–1.0). Typically NULL for raw-layer types.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
+    /// Which agent/harness wrote this memory (e.g. claude-code, codex, opencode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -84,6 +87,8 @@ pub struct StoreOutput {
     pub applies_to_situations: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub idempotent_replay: bool,
 }
 
@@ -139,6 +144,7 @@ pub async fn handle(
         event_time,
         record_time: now,
         idempotency_key: args.idempotency_key,
+        source: args.source,
         memory_type,
         tags,
         external_refs: args.external_refs,
@@ -174,6 +180,7 @@ fn row_to_output(row: MemoryRow, replayed: bool) -> StoreOutput {
         applies_to_projects: row.applies_to_projects,
         applies_to_situations: row.applies_to_situations,
         confidence: row.confidence,
+        source: row.source,
         idempotent_replay: replayed,
     }
 }
