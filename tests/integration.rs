@@ -29,7 +29,8 @@ use chitta::db;
 use chitta::embedding::Embedder;
 use chitta::error::ChittaError;
 use chitta::tools::{
-    self, AppliesTo, DeleteArgs, GetArgs, ListArgs, SearchArgs, StoreArgs, UpdateArgs,
+    self, AppliesTo, DeleteArgs, GetArgs, ListArgs, SearchArgs, StoreArgs, SupersedeArgs,
+    UpdateArgs,
 };
 use sqlx::PgPool;
 use tokio::sync::OnceCell;
@@ -2448,4 +2449,298 @@ async fn applies_to_uses_gin_index() {
         .unwrap();
         assert!(exists, "GIN index {idx_name} must exist");
     }
+}
+
+// ---- supersede_memory ------------------------------------------------
+
+fn store_args(profile: &str, content: &str, key: &str) -> StoreArgs {
+    StoreArgs {
+        profile: profile.into(),
+        content: content.into(),
+        idempotency_key: key.into(),
+        event_time: None,
+        tags: None,
+        metadata: None,
+        memory_type: Some("trait".into()),
+        external_refs: None,
+        applies_to_domains: None,
+        applies_to_skills: None,
+        applies_to_projects: None,
+        applies_to_situations: None,
+        confidence: Some(0.7),
+        source: None,
+        derivations: None,
+    }
+}
+
+#[tokio::test]
+async fn supersede_happy_path() {
+    let h = require_harness!("supersede_happy");
+
+    let old = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        store_args(&h.profile, "Josh prefers tabs", "sup-old"),
+    )
+    .await
+    .unwrap();
+
+    let new = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        store_args(&h.profile, "Josh prefers spaces", "sup-new"),
+    )
+    .await
+    .unwrap();
+
+    let result = tools::supersede::handle(
+        &h.pool,
+        SupersedeArgs {
+            profile: h.profile.clone(),
+            old_id: old.id.to_string(),
+            new_id: new.id.to_string(),
+            reason: "correction based on recent session".into(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.old_id, old.id);
+    assert_eq!(result.new_id, new.id);
+
+    // Verify superseded_by is set on old row.
+    let old_row = tools::get::handle(
+        &h.pool,
+        GetArgs {
+            profile: h.profile.clone(),
+            id: old.id.to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(old_row.superseded_by, Some(new.id));
+
+    // Verify derivation row exists.
+    let derivations = db::get_derivations_for(&h.pool, new.id).await.unwrap();
+    assert_eq!(derivations.len(), 1);
+    assert_eq!(derivations[0].source_id, old.id);
+    assert_eq!(derivations[0].derivation_type, "supersedes");
+    assert_eq!(derivations[0].id, result.derivation_id);
+}
+
+#[tokio::test]
+async fn supersede_invalid_old_id() {
+    let h = require_harness!("supersede_bad_old");
+
+    let new = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        store_args(&h.profile, "some trait", "sup-new-2"),
+    )
+    .await
+    .unwrap();
+
+    let err = tools::supersede::handle(
+        &h.pool,
+        SupersedeArgs {
+            profile: h.profile.clone(),
+            old_id: Uuid::now_v7().to_string(),
+            new_id: new.id.to_string(),
+            reason: "test".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(err, ChittaError::NotFound { .. }));
+}
+
+#[tokio::test]
+async fn supersede_invalid_new_id() {
+    let h = require_harness!("supersede_bad_new");
+
+    let old = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        store_args(&h.profile, "some trait", "sup-old-3"),
+    )
+    .await
+    .unwrap();
+
+    let err = tools::supersede::handle(
+        &h.pool,
+        SupersedeArgs {
+            profile: h.profile.clone(),
+            old_id: old.id.to_string(),
+            new_id: Uuid::now_v7().to_string(),
+            reason: "test".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(err, ChittaError::NotFound { .. }));
+}
+
+#[tokio::test]
+async fn supersede_profile_mismatch() {
+    let h = require_harness!("supersede_profile");
+
+    let old = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        store_args(&h.profile, "trait in profile A", "sup-pm-old"),
+    )
+    .await
+    .unwrap();
+
+    let new = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        store_args(&h.profile, "trait in profile A", "sup-pm-new"),
+    )
+    .await
+    .unwrap();
+
+    // Call supersede with a different profile — old_id won't be found.
+    let err = tools::supersede::handle(
+        &h.pool,
+        SupersedeArgs {
+            profile: "wrong_profile".into(),
+            old_id: old.id.to_string(),
+            new_id: new.id.to_string(),
+            reason: "test".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(err, ChittaError::NotFound { .. }));
+}
+
+#[tokio::test]
+async fn supersede_already_superseded_rejects() {
+    let h = require_harness!("supersede_double");
+
+    let old = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        store_args(&h.profile, "original trait", "sup-dbl-old"),
+    )
+    .await
+    .unwrap();
+
+    let new1 = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        store_args(&h.profile, "replacement 1", "sup-dbl-new1"),
+    )
+    .await
+    .unwrap();
+
+    let new2 = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        store_args(&h.profile, "replacement 2", "sup-dbl-new2"),
+    )
+    .await
+    .unwrap();
+
+    // First supersession succeeds.
+    tools::supersede::handle(
+        &h.pool,
+        SupersedeArgs {
+            profile: h.profile.clone(),
+            old_id: old.id.to_string(),
+            new_id: new1.id.to_string(),
+            reason: "first supersession".into(),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Second supersession of the same old_id should fail.
+    let err = tools::supersede::handle(
+        &h.pool,
+        SupersedeArgs {
+            profile: h.profile.clone(),
+            old_id: old.id.to_string(),
+            new_id: new2.id.to_string(),
+            reason: "second attempt".into(),
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(err, ChittaError::InvalidArgument { .. }));
+}
+
+#[tokio::test]
+async fn superseded_row_excluded_from_default_search() {
+    let h = require_harness!("supersede_search");
+    let search_cfg = test_search_cfg();
+
+    let old = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        store_args(&h.profile, "Josh strongly prefers tabs over spaces in all code", "sup-srch-old"),
+    )
+    .await
+    .unwrap();
+
+    let new = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        store_args(&h.profile, "Josh strongly prefers spaces over tabs in all code", "sup-srch-new"),
+    )
+    .await
+    .unwrap();
+
+    // Supersede old with new.
+    tools::supersede::handle(
+        &h.pool,
+        SupersedeArgs {
+            profile: h.profile.clone(),
+            old_id: old.id.to_string(),
+            new_id: new.id.to_string(),
+            reason: "preference changed".into(),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Default search should not return the superseded row.
+    let results = tools::search::handle(
+        &h.pool,
+        h.embedder.clone(),
+        false,
+        &search_cfg,
+        SearchArgs {
+            profile: h.profile.clone(),
+            query: "tabs vs spaces preference".into(),
+            k: Some(10),
+            max_tokens: None,
+            tags: None,
+            min_similarity: Some(0.0),
+            include_content: None,
+            memory_types: None,
+            exclude_invalidated: None,
+            exclude_retired: None,
+            ref_filter: None,
+            include_raw: None,
+            applies_to: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let result_ids: Vec<_> = results.results.iter().map(|r| r.id).collect();
+    assert!(
+        !result_ids.contains(&old.id),
+        "superseded memory should not appear in default search"
+    );
+    assert!(
+        result_ids.contains(&new.id),
+        "replacement memory should appear in search"
+    );
 }

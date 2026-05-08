@@ -151,6 +151,23 @@ impl ChittaServer {
         serde_json::to_string_pretty(&out).map_err(json_to_rmcp)
     }
 
+    /// Supersede a memory: mark old as superseded by new, write derivation row atomically.
+    #[tool(
+        description = "Supersede a memory. Sets superseded_by on old_id, writes a \
+                          derivation row linking new_id → old_id with type 'supersedes', \
+                          in one transaction. Both memories must exist in the profile. \
+                          Superseded memories are excluded from default search."
+    )]
+    pub async fn supersede_memory(
+        &self,
+        Parameters(args): Parameters<tools::SupersedeArgs>,
+    ) -> Result<String, ErrorData> {
+        let out = tools::supersede::handle(&self.pool, args)
+            .await
+            .map_err(chitta_to_rmcp)?;
+        serde_json::to_string_pretty(&out).map_err(json_to_rmcp)
+    }
+
     /// Health check — verifies DB connectivity and embedder responsiveness.
     #[tool(
         description = "Health check. Verifies DB connectivity and ONNX embedder \
@@ -174,8 +191,9 @@ impl ServerHandler for ChittaServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "chitta v0.3.0 — working model of Josh. \
-                 Seven tools: store_memory, get_memory, search_memories, \
-                 update_memory, delete_memory, list_recent_memories, health_check. \
+                 Eight tools: store_memory, get_memory, search_memories, \
+                 update_memory, delete_memory, list_recent_memories, \
+                 supersede_memory, health_check. \
                  Profiles isolate namespaces; idempotency_key dedupes writes; \
                  bi-temporal (event_time + record_time); verbatim storage.",
         )

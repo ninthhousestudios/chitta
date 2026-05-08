@@ -776,6 +776,36 @@ pub async fn get_derivations_for(pool: &PgPool, derived_id: Uuid) -> Result<Vec<
     Ok(rows)
 }
 
+pub async fn supersede_memory(
+    pool: &PgPool,
+    old_id: Uuid,
+    new_id: Uuid,
+) -> Result<DerivationRow> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("UPDATE memories SET superseded_by = $1 WHERE id = $2")
+        .bind(new_id)
+        .bind(old_id)
+        .execute(&mut *tx)
+        .await?;
+
+    let derivation = sqlx::query_as::<_, DerivationRow>(
+        r#"
+        INSERT INTO derivations (derived_id, source_id, derivation_type)
+        VALUES ($1, $2, 'supersedes')
+        RETURNING id, derived_id, source_id, derivation_type, created_at
+        "#,
+    )
+    .bind(new_id)
+    .bind(old_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(derivation)
+}
+
 pub async fn get_derived_from(pool: &PgPool, source_id: Uuid) -> Result<Vec<DerivationRow>> {
     let rows = sqlx::query_as::<_, DerivationRow>(
         r#"

@@ -9,8 +9,8 @@ use chitta::envelope::Envelope;
 use chitta::error::{ChittaError, codes};
 use chitta::tools::{
     AppliesTo, DerivationInput, DeleteArgs, DeleteOutput, GetArgs, GetOutput, ListArgs, ListItem,
-    ListOutput, SearchArgs, SearchHit, SearchOutput, StoreArgs, StoreOutput, UpdateArgs,
-    UpdateOutput,
+    ListOutput, SearchArgs, SearchHit, SearchOutput, StoreArgs, StoreOutput, SupersedeArgs,
+    SupersedeOutput, UpdateArgs, UpdateOutput,
 };
 use serde_json::{Value, json};
 
@@ -802,4 +802,38 @@ fn decision_happy_path_accepted() {
         "rejected_alternatives": ["option A was too slow"]
     }));
     assert!(validators::validate_decision_metadata("store_memory", "decision", &meta).is_ok());
+}
+
+// ---- SupersedeArgs / SupersedeOutput (wire shape) ---------------------
+
+#[test]
+fn supersede_args_shape() {
+    let v = json!({
+        "profile": "josh",
+        "old_id": "019e0725-aab3-7160-905b-a150603d16d9",
+        "new_id": "019e0725-aab3-7160-905b-a150603d16da",
+        "reason": "new observation contradicts old trait"
+    });
+    let args: SupersedeArgs = serde_json::from_value(v).unwrap();
+    assert_eq!(args.profile, "josh");
+    assert_eq!(args.old_id, "019e0725-aab3-7160-905b-a150603d16d9");
+    assert_eq!(args.new_id, "019e0725-aab3-7160-905b-a150603d16da");
+    assert_eq!(args.reason, "new observation contradicts old trait");
+}
+
+#[test]
+fn supersede_args_rejects_missing_fields() {
+    let v = json!({"profile": "josh", "old_id": "abc"});
+    assert!(serde_json::from_value::<SupersedeArgs>(v).is_err());
+}
+
+#[test]
+fn supersede_output_wire_keys() {
+    let out = SupersedeOutput {
+        old_id: uuid::Uuid::now_v7(),
+        new_id: uuid::Uuid::now_v7(),
+        derivation_id: uuid::Uuid::now_v7(),
+    };
+    let v = serde_json::to_value(&out).unwrap();
+    assert_keys(&v, &["old_id", "new_id", "derivation_id"]);
 }
