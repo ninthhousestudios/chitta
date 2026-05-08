@@ -14,6 +14,10 @@ path = "src/lib.rs"
 name = "chitta"
 path = "src/main.rs"
 
+[[bin]]
+name = "chitta-migrate"
+path = "src/bin/chitta-migrate.rs"
+
 [dependencies]
 # Async runtime. De facto standard for Rust network services; needed for stdio I/O + DB pool.
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "io-std", "io-util"] }

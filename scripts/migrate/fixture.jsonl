@@ -1,0 +1,7 @@
+{"profile":"josh","content":"Josh prefers concise code over verbose implementations","idempotency_key":"fixture-1","memory_type":"observation","tags":["preference","code-style"]}
+{"profile":"josh","content":"Chose Rust for chitta because of type safety and performance","idempotency_key":"fixture-2","memory_type":"decision","metadata":{"rationale":"Type safety catches bugs at compile time; performance matters for embedding pipeline","rejected_alternatives":["Python was too slow for the embedding hot path"]}}
+{"profile":"josh","content":"Bad decision without rationale — should be rejected","idempotency_key":"fixture-3","memory_type":"decision","metadata":{}}
+{"profile":"josh","content":"Josh values clarity over cleverness in all code","idempotency_key":"fixture-4","memory_type":"trait","tags":["value","clarity"]}
+{"profile":"josh","content":"Episode without derivations — should be rejected","idempotency_key":"fixture-5","memory_type":"episode"}
+{"profile":"josh","content":"Josh dislikes verbose logging that obscures real errors","idempotency_key":"fixture-6","memory_type":"observation","tags":["preference","logging"]}
+{"profile":"josh","content":"Josh uses hyphens not underscores in filenames","idempotency_key":"fixture-7","memory_type":"preference","tags":["naming","convention"]}
