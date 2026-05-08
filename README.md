@@ -24,8 +24,8 @@ upholds.
 ## Install
 
 ```bash
-createdb chitta_rs
-psql chitta_rs -c 'create extension if not exists vector'
+createdb chitta
+psql chitta -c 'create extension if not exists vector'
 cargo install --path .
 ```
 
@@ -40,7 +40,7 @@ working directory is also loaded as a fallback.
 | Variable | Default | Notes |
 |---|---|---|
 | `CHITTA_HOME` | `~/.chitta` | Data directory root. |
-| `DATABASE_URL` | `postgresql://localhost/chitta_rs` | libpq-compatible Postgres URL. |
+| `DATABASE_URL` | `postgresql://localhost/chitta` | libpq-compatible Postgres URL. |
 | `CHITTA_MODEL_PATH` | `~/.chitta/models/bge-m3-onnx` | Directory with the ONNX model + tokenizer. |
 | `CHITTA_LOG_LEVEL` | `info` | `tracing_subscriber` env filter syntax. |
 | `CHITTA_HTTP_ADDR` | `127.0.0.1` | HTTP listen address (with `--http`). |
@@ -134,9 +134,9 @@ cargo test --lib
 Require a live Postgres with pgvector and the ONNX model on disk:
 
 ```bash
-createdb chitta_rs_test
-psql chitta_rs_test -c 'create extension if not exists vector'
-export TEST_DATABASE_URL=postgres://localhost/chitta_rs_test
+createdb chitta_test
+psql chitta_test -c 'create extension if not exists vector'
+export TEST_DATABASE_URL=postgres://localhost/chitta_test
 cargo test --test integration
 ```
 

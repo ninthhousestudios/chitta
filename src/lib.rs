@@ -1,7 +1,7 @@
-//! chitta-rs — agent-native persistent memory server.
+//! chitta — working model of Josh.
 //!
 //! The library side exists so integration tests and `main.rs` share types.
-//! Principles live in `rust/docs/principles.md`; scope in `starting-shape.md`.
+//! See `docs/plans/working-model-prd.md` for the v0 design.
 
 pub mod config;
 pub mod db;

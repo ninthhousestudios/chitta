@@ -34,12 +34,21 @@ pub struct GetOutput {
     pub record_time: DateTime<Utc>,
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
     pub memory_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_refs: Option<serde_json::Value>,
+    pub applies_to_domains: Vec<String>,
+    pub applies_to_skills: Vec<String>,
+    pub applies_to_projects: Vec<String>,
+    pub applies_to_situations: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
+    pub reinforcement_count: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_reinforced_at: Option<DateTime<Utc>>,
 }
 
 #[tracing::instrument(
@@ -68,9 +77,16 @@ pub async fn handle(pool: &PgPool, args: GetArgs) -> Result<GetOutput> {
         event_time: row.event_time,
         record_time: row.record_time,
         tags: row.tags,
-        source: row.source,
         metadata: row.metadata,
         memory_type: row.memory_type,
         external_refs: row.external_refs,
+        applies_to_domains: row.applies_to_domains,
+        applies_to_skills: row.applies_to_skills,
+        applies_to_projects: row.applies_to_projects,
+        applies_to_situations: row.applies_to_situations,
+        superseded_by: row.superseded_by,
+        confidence: row.confidence,
+        reinforcement_count: row.reinforcement_count,
+        last_reinforced_at: row.last_reinforced_at,
     })
 }

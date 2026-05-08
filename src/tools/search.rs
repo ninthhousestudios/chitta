@@ -65,7 +65,7 @@ pub struct SearchArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub include_content: Option<bool>,
     /// Filter by memory type(s). OR-match: returns memories matching any listed type.
-    /// Valid types: memory, observation, decision, session_summary, mental_model.
+    /// Valid types: observation, episode, decision, trait, value, pattern, preference, mental_model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_types: Option<Vec<String>>,
     /// Exclude soft-deleted memories. Default true.
@@ -89,14 +89,14 @@ pub struct SearchHit {
     pub record_time: DateTime<Utc>,
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
     pub memory_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_refs: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
 }
 
 pub type SearchOutput = Envelope<SearchHit>;
@@ -238,7 +238,6 @@ pub async fn handle(
             event_time: hit.event_time,
             record_time: hit.record_time,
             tags: hit.tags,
-            source: hit.source,
             content: if include_content {
                 Some(hit.content)
             } else {
@@ -247,6 +246,7 @@ pub async fn handle(
             metadata: if include_content { hit.metadata } else { None },
             memory_type: hit.memory_type,
             external_refs: hit.external_refs,
+            confidence: hit.confidence,
         })
         .collect();
 
@@ -409,11 +409,11 @@ mod tests {
             event_time: t,
             record_time: t,
             tags: vec![],
-            source: None,
             content: None,
             metadata: None,
-            memory_type: "memory".to_string(),
+            memory_type: "observation".to_string(),
             external_refs: None,
+            confidence: None,
         }
     }
 

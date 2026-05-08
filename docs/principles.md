@@ -1,4 +1,4 @@
-# chitta-rs — foundational principles
+# chitta — foundational principles
 
 Reference doc. These principles override convenience. If a proposed change violates one, the change loses unless the principle is explicitly revised here first.
 
@@ -16,7 +16,7 @@ The source text of a memory, as stored, is immutable. Everything else (embedding
 
 Every memory row is born with two timestamps:
 - `event_time` — when the thing happened in the world.
-- `record_time` — when chitta-rs learned about it.
+- `record_time` — when chitta learned about it.
 
 Corrections are new rows that supersede, not edits. The audit trail is append-only.
 
@@ -66,7 +66,7 @@ No entity extraction, no temporal parsing, no language-pack lookups on the write
 
 ## 10. Every dependency has a written reason
 
-Each entry in `Cargo.toml` has a one-line comment stating what it's for and what was considered instead. If no reason can be written, the dependency isn't taken. This is the direct answer to the "I don't trust this code" complaint — chitta-rs will only contain code whose presence is justified.
+Each entry in `Cargo.toml` has a one-line comment stating what it's for and what was considered instead. If no reason can be written, the dependency isn't taken. This is the direct answer to the "I don't trust this code" complaint — chitta will only contain code whose presence is justified.
 
 **Rules out:** silent dependency growth. "Might as well add X." Transitive dependency bloat via convenience crates.
 

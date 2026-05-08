@@ -5,9 +5,9 @@
 //! changes, a test here fails loudly before integration tests or a caller
 //! even notice.
 
-use chitta_rs::envelope::Envelope;
-use chitta_rs::error::{ChittaError, codes};
-use chitta_rs::tools::{
+use chitta::envelope::Envelope;
+use chitta::error::{ChittaError, codes};
+use chitta::tools::{
     DeleteArgs, DeleteOutput, GetArgs, GetOutput, ListArgs, ListItem, ListOutput, SearchArgs,
     SearchHit, SearchOutput, StoreArgs, StoreOutput, UpdateArgs, UpdateOutput,
 };
@@ -85,10 +85,14 @@ fn store_output_wire_keys() {
         event_time: t,
         record_time: t,
         tags: vec![],
-        source: Some("test".into()),
         metadata: Some(json!({"k": "v"})),
-        memory_type: "memory".into(),
+        memory_type: "observation".into(),
         external_refs: None,
+        applies_to_domains: vec![],
+        applies_to_skills: vec![],
+        applies_to_projects: vec![],
+        applies_to_situations: vec![],
+        confidence: None,
         idempotent_replay: false,
     };
     let v = serde_json::to_value(&out).unwrap();
@@ -101,7 +105,6 @@ fn store_output_wire_keys() {
             "event_time",
             "record_time",
             "tags",
-            "source",
             "metadata",
             "memory_type",
             "idempotent_replay",
@@ -120,10 +123,17 @@ fn get_output_wire_keys() {
         event_time: t,
         record_time: t,
         tags: vec!["x".into()],
-        source: None,
         metadata: None,
         memory_type: "observation".into(),
         external_refs: None,
+        applies_to_domains: vec![],
+        applies_to_skills: vec![],
+        applies_to_projects: vec![],
+        applies_to_situations: vec![],
+        superseded_by: None,
+        confidence: None,
+        reinforcement_count: 0,
+        last_reinforced_at: None,
     };
     let v = serde_json::to_value(&out).unwrap();
     assert_keys(
@@ -151,11 +161,11 @@ fn search_output_envelope_shape() {
         event_time: t,
         record_time: t,
         tags: vec![],
-        source: None,
         content: None,
         metadata: None,
-        memory_type: "memory".into(),
+        memory_type: "observation".into(),
         external_refs: None,
+        confidence: None,
     };
     let env: SearchOutput = Envelope::new(vec![hit], false, Some(1), 42);
     let v = serde_json::to_value(&env).unwrap();
@@ -275,7 +285,7 @@ fn error_data_skip_serializes_none_fields() {
 
 #[test]
 fn chitta_to_rmcp_preserves_code_and_contract_fields() {
-    use chitta_rs::mcp::chitta_to_rmcp;
+    use chitta::mcp::chitta_to_rmcp;
     use std::io;
 
     let variants: Vec<(ChittaError, i32)> = vec![
@@ -417,7 +427,6 @@ fn update_output_wire_keys() {
         event_time: t,
         record_time: t,
         tags: vec!["t".into()],
-        source: None,
         metadata: None,
         memory_type: "decision".into(),
         external_refs: None,
@@ -488,9 +497,9 @@ fn list_output_wire_keys() {
         event_time: t,
         record_time: t,
         tags: vec!["t".into()],
-        source: None,
-        memory_type: "memory".into(),
+        memory_type: "observation".into(),
         external_refs: None,
+        confidence: None,
     };
     let out = ListOutput {
         memories: vec![item],

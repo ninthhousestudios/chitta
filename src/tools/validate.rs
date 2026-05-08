@@ -191,10 +191,13 @@ pub fn max_tokens(tool: &'static str, value: u64) -> Result<()> {
 }
 
 pub const VALID_MEMORY_TYPES: &[&str] = &[
-    "memory",
     "observation",
+    "episode",
     "decision",
-    "session_summary",
+    "trait",
+    "value",
+    "pattern",
+    "preference",
     "mental_model",
 ];
 

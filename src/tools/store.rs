@@ -37,20 +37,32 @@ pub struct StoreArgs {
     /// Optional tags. Up to 32, each 1-64 chars.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
-    /// Provenance: which client stored this (e.g. "claude-code", "cursor").
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
     /// Arbitrary structured data alongside the memory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
-    /// Memory type classification. Default: "memory".
-    /// Valid: memory, observation, decision, session_summary, mental_model.
+    /// Memory type. Default: "observation".
+    /// Valid: observation, episode, decision, trait, value, pattern, preference, mental_model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_type: Option<String>,
     /// External references. JSON array of `{"kind": "<type>", "ref": "<value>"}`.
     /// Kinds: file, commit, yojana_task, memory, url, session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_refs: Option<serde_json::Value>,
+    /// Domain facets for retrieval scoping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applies_to_domains: Option<Vec<String>>,
+    /// Skill facets for retrieval scoping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applies_to_skills: Option<Vec<String>>,
+    /// Project facets for retrieval scoping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applies_to_projects: Option<Vec<String>>,
+    /// Situation facets for retrieval scoping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applies_to_situations: Option<Vec<String>>,
+    /// Confidence score (0.0–1.0). Typically NULL for raw-layer types.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -62,12 +74,16 @@ pub struct StoreOutput {
     pub record_time: DateTime<Utc>,
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
     pub memory_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_refs: Option<serde_json::Value>,
+    pub applies_to_domains: Vec<String>,
+    pub applies_to_skills: Vec<String>,
+    pub applies_to_projects: Vec<String>,
+    pub applies_to_situations: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
     pub idempotent_replay: bool,
 }
 
@@ -90,25 +106,18 @@ pub async fn handle(
     }
     let tags = args.tags.unwrap_or_default();
     validate::tags(TOOL, &tags)?;
-    let memory_type = args.memory_type.unwrap_or_else(|| "memory".to_string());
+    let memory_type = args.memory_type.unwrap_or_else(|| "observation".to_string());
     validate::memory_type(TOOL, &memory_type)?;
     if let Some(ref refs) = args.external_refs {
         validate::external_refs(TOOL, refs)?;
     }
 
-    // Pre-flight SELECT: if the (profile, idempotency_key) pair already
-    // exists, return the prior row immediately — no embed, no insert.
-    // The unique constraint on (profile, idempotency_key) remains the
-    // authoritative guard for TOCTOU races on the cold-write path.
     if let Some(existing) =
         db::find_by_idempotency_key(pool, &args.profile, &args.idempotency_key).await?
     {
         return Ok(row_to_output(existing, true));
     }
 
-    // embed() is async and manages its own spawn_blocking internally,
-    // so we call it directly. We move content out of args to avoid
-    // cloning; embed borrows it, then we keep ownership for the insert.
     let content = args.content;
     let embed_out = embedder.embed_full(&content, "store_memory").await?;
     let sparse_embedding = if embed_out.sparse.is_empty() {
@@ -125,16 +134,23 @@ pub async fn handle(
         id: Uuid::now_v7(),
         profile: args.profile,
         content,
-        embedding: Vector::from(embed_out.dense),
+        embedding: Some(Vector::from(embed_out.dense)),
+        sparse_embedding,
         event_time,
         record_time: now,
-        tags,
         idempotency_key: args.idempotency_key,
-        source: args.source,
-        metadata: args.metadata,
-        sparse_embedding,
         memory_type,
+        tags,
         external_refs: args.external_refs,
+        metadata: args.metadata,
+        applies_to_domains: args.applies_to_domains.unwrap_or_default(),
+        applies_to_skills: args.applies_to_skills.unwrap_or_default(),
+        applies_to_projects: args.applies_to_projects.unwrap_or_default(),
+        applies_to_situations: args.applies_to_situations.unwrap_or_default(),
+        superseded_by: None,
+        confidence: args.confidence,
+        reinforcement_count: 0,
+        last_reinforced_at: None,
         invalidated_at: None,
     };
 
@@ -150,10 +166,14 @@ fn row_to_output(row: MemoryRow, replayed: bool) -> StoreOutput {
         event_time: row.event_time,
         record_time: row.record_time,
         tags: row.tags,
-        source: row.source,
         metadata: row.metadata,
         memory_type: row.memory_type,
         external_refs: row.external_refs,
+        applies_to_domains: row.applies_to_domains,
+        applies_to_skills: row.applies_to_skills,
+        applies_to_projects: row.applies_to_projects,
+        applies_to_situations: row.applies_to_situations,
+        confidence: row.confidence,
         idempotent_replay: replayed,
     }
 }

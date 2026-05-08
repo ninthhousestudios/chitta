@@ -53,32 +53,8 @@ pub async fn search_hybrid(
     };
     let dense_fut = db::search_by_embedding(pool, &dense_params);
 
-    let fts_fut = async {
-        if p.search_cfg.rrf_fts {
-            db::search_by_fts(
-                pool,
-                p.profile,
-                p.query_text,
-                fetch_limit,
-                p.tags,
-                p.memory_types,
-                p.exclude_invalidated,
-                p.exclude_retired,
-                p.ref_filter_json,
-            )
-            .await
-        } else {
-            Ok(vec![])
-        }
-    };
-
-    let (dense_result, fts_result) = tokio::join!(dense_fut, fts_fut);
-
-    let (dense_hits, total) = dense_result?;
-    let fts_ids = fts_result.unwrap_or_else(|e| {
-        tracing::warn!("FTS leg failed, continuing with dense only: {e}");
-        vec![]
-    });
+    let (dense_hits, total) = dense_fut.await?;
+    let fts_ids: Vec<Uuid> = vec![];
 
     // Build rank lists: doc -> rank (0-based).
     let mut rrf_scores: HashMap<Uuid, f32> = HashMap::new();

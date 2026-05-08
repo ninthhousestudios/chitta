@@ -1,13 +1,13 @@
 [package]
-name = "chitta-rs"
-version = "0.2.0"
+name = "chitta"
+version = "0.3.0"
 edition = "2024"
-description = "Self-hosted agent-native persistent memory and learning system (Rust rewrite)."
+description = "Working model of Josh — agent-native persistent memory for the manas ecosystem."
 license = "MIT OR Apache-2.0"
 publish = false
 
 [lib]
-name = "chitta_rs"
+name = "chitta"
 path = "src/lib.rs"
 
 [[bin]]

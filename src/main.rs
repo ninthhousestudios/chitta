@@ -1,4 +1,4 @@
-//! chitta-rs binary entrypoint. See `docs/starting-shape.md` for scope.
+//! chitta binary entrypoint. See `docs/starting-shape.md` for scope.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
-use chitta_rs::{
+use chitta::{
     config::{Config, chitta_home},
     db,
     embedding::Embedder,
@@ -44,7 +44,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Run chitta-rs as a stdio MCP server (default when no subcommand given).
+    /// Run chitta as a stdio MCP server (default when no subcommand given).
     Serve,
     /// Re-run logged queries against current DB state for regression detection.
     Replay {
@@ -89,7 +89,7 @@ async fn main() -> Result<()> {
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         model_path = ?cfg.model_path,
-        "starting chitta-rs"
+        "starting chitta"
     );
 
     let pool = db::connect(&cfg).await.context("connecting to database")?;
@@ -141,7 +141,7 @@ async fn serve_stdio(
     pool: sqlx::PgPool,
     embedder: Arc<Embedder>,
     query_log_enabled: bool,
-    search_cfg: chitta_rs::config::SearchConfig,
+    search_cfg: chitta::config::SearchConfig,
 ) -> Result<()> {
     let server = ChittaServer::new(pool, Arc::clone(&embedder), query_log_enabled, search_cfg);
     let (stdin, stdout) = stdio();
@@ -485,7 +485,7 @@ async fn serve_http(
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|e| anyhow::anyhow!("failed to bind {addr}: {e} — is the port in use?"))?;
-    tracing::info!(%addr, "chitta-rs HTTP server listening");
+    tracing::info!(%addr, "chitta HTTP server listening");
 
     let cancel_for_shutdown = cancel.clone();
     axum::serve(listener, app)

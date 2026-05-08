@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use crate::error::Result;
 
-const DEFAULT_DATABASE_URL: &str = "postgresql://josh:ogham@localhost/chitta_rs";
+const DEFAULT_DATABASE_URL: &str = "postgresql://josh:ogham@localhost/chitta";
 
 /// Search-related configuration bundled to reduce positional-parameter sprawl.
 #[derive(Debug, Clone)]
@@ -258,7 +258,7 @@ mod tests {
     fn defaults_when_only_database_url_set() {
         with_env(
             &[
-                ("DATABASE_URL", Some("postgres://localhost/chitta_rs")),
+                ("DATABASE_URL", Some("postgres://localhost/chitta")),
                 ("CHITTA_MODEL_PATH", None),
                 ("CHITTA_LOG_LEVEL", None),
             ],

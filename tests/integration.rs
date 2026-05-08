@@ -11,8 +11,8 @@
 //! # Running
 //!
 //! ```bash
-//! createdb chitta_rs_test
-//! export TEST_DATABASE_URL=postgres://localhost/chitta_rs_test
+//! createdb chitta_test
+//! export TEST_DATABASE_URL=postgres://localhost/chitta_test
 //! # CHITTA_MODEL_PATH defaults to ~/.cache/chitta/bge-m3-onnx
 //! cargo test --test integration
 //! ```
@@ -24,11 +24,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use chitta_rs::config::{Config, SearchConfig};
-use chitta_rs::db;
-use chitta_rs::embedding::Embedder;
-use chitta_rs::error::ChittaError;
-use chitta_rs::tools::{self, DeleteArgs, GetArgs, ListArgs, SearchArgs, StoreArgs, UpdateArgs};
+use chitta::config::{Config, SearchConfig};
+use chitta::db;
+use chitta::embedding::Embedder;
+use chitta::error::ChittaError;
+use chitta::tools::{self, DeleteArgs, GetArgs, ListArgs, SearchArgs, StoreArgs, UpdateArgs};
 use sqlx::PgPool;
 use tokio::sync::OnceCell;
 use uuid::Uuid;
@@ -226,10 +226,15 @@ async fn idempotent_replay_returns_same_row() {
         idempotency_key: "k-1".into(),
         event_time: None,
         tags: None,
-        source: None,
+
         metadata: None,
         memory_type: None,
         external_refs: None,
+        applies_to_domains: None,
+        applies_to_skills: None,
+        applies_to_projects: None,
+        applies_to_situations: None,
+        confidence: None,
     };
 
     let first = tools::store::handle(&h.pool, h.embedder.clone(), args())
@@ -276,10 +281,15 @@ async fn verbatim_roundtrip_preserves_unicode_and_whitespace() {
             idempotency_key: "v-1".into(),
             event_time: None,
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -353,10 +363,15 @@ async fn search_max_tokens_triggers_truncated_with_honest_total() {
                 idempotency_key: format!("b-{i}"),
                 event_time: None,
                 tags: None,
-                source: None,
+        
                 metadata: None,
                 memory_type: None,
                 external_refs: None,
+                applies_to_domains: None,
+                applies_to_skills: None,
+                applies_to_projects: None,
+                applies_to_situations: None,
+                confidence: None,
             },
         )
         .await
@@ -415,10 +430,15 @@ async fn error_contract_invalid_event_time_populates_next_action() {
                     .unwrap(),
             ),
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -471,10 +491,15 @@ async fn search_snippet_is_verbatim_prefix() {
             idempotency_key: "s-1".into(),
             event_time: None,
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -526,10 +551,15 @@ async fn profile_isolation_keeps_searches_scoped() {
             idempotency_key: "a-1".into(),
             event_time: None,
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -576,10 +606,15 @@ async fn content_too_long_rejected_with_token_count() {
             idempotency_key: "l-1".into(),
             event_time: None,
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -606,10 +641,15 @@ async fn concurrent_duplicate_writes_converge_on_one_row() {
         idempotency_key: "c-1".into(),
         event_time: None,
         tags: None,
-        source: None,
+
         metadata: None,
         memory_type: None,
         external_refs: None,
+        applies_to_domains: None,
+        applies_to_skills: None,
+        applies_to_projects: None,
+        applies_to_situations: None,
+        confidence: None,
     };
 
     let (a, b) = tokio::join!(
@@ -650,10 +690,15 @@ async fn search_finds_stored_memory_by_semantic_similarity() {
             idempotency_key: "sem-1".into(),
             event_time: None,
             tags: Some(vec!["db".into(), "perf".into()]),
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -708,10 +753,15 @@ async fn update_memory_content_reembeds() {
             idempotency_key: "uc-1".into(),
             event_time: None,
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -725,7 +775,6 @@ async fn update_memory_content_reembeds() {
             id: stored.id.to_string(),
             content: Some("completely new content about cooking".into()),
             tags: None,
-            source: None,
             metadata: None,
             memory_type: None,
             external_refs: None,
@@ -763,10 +812,15 @@ async fn update_memory_tags_only_no_reembed() {
             idempotency_key: "ut-1".into(),
             event_time: None,
             tags: Some(vec!["old".into()]),
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -780,7 +834,6 @@ async fn update_memory_tags_only_no_reembed() {
             id: stored.id.to_string(),
             content: None,
             tags: Some(vec!["new-tag".into(), "another".into()]),
-            source: None,
             metadata: None,
             memory_type: None,
             external_refs: None,
@@ -810,7 +863,6 @@ async fn update_memory_not_found() {
             id: Uuid::now_v7().to_string(),
             content: Some("anything".into()),
             tags: None,
-            source: None,
             metadata: None,
             memory_type: None,
             external_refs: None,
@@ -837,7 +889,6 @@ async fn update_memory_requires_at_least_one_field() {
             id: Uuid::now_v7().to_string(),
             content: None,
             tags: None,
-            source: None,
             metadata: None,
             memory_type: None,
             external_refs: None,
@@ -871,10 +922,15 @@ async fn soft_delete_hides_memory() {
             idempotency_key: "d-1".into(),
             event_time: None,
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -923,10 +979,15 @@ async fn restore_after_soft_delete_creates_new_row() {
             idempotency_key: "reuse-key".into(),
             event_time: None,
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -952,10 +1013,15 @@ async fn restore_after_soft_delete_creates_new_row() {
             idempotency_key: "reuse-key".into(),
             event_time: None,
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -1002,10 +1068,15 @@ async fn list_recent_returns_time_ordered() {
                 idempotency_key: format!("lo-{i}"),
                 event_time: None,
                 tags: None,
-                source: None,
+        
                 metadata: None,
                 memory_type: None,
                 external_refs: None,
+                applies_to_domains: None,
+                applies_to_skills: None,
+                applies_to_projects: None,
+                applies_to_situations: None,
+                confidence: None,
             },
         )
         .await
@@ -1051,10 +1122,15 @@ async fn list_recent_respects_limit() {
                 idempotency_key: format!("ll-{i}"),
                 event_time: None,
                 tags: None,
-                source: None,
+        
                 metadata: None,
                 memory_type: None,
                 external_refs: None,
+                applies_to_domains: None,
+                applies_to_skills: None,
+                applies_to_projects: None,
+                applies_to_situations: None,
+                confidence: None,
             },
         )
         .await
@@ -1094,10 +1170,15 @@ async fn search_with_tag_filter_returns_only_matching() {
             idempotency_key: "tf-1".into(),
             event_time: None,
             tags: Some(vec!["rust".into()]),
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -1112,10 +1193,15 @@ async fn search_with_tag_filter_returns_only_matching() {
             idempotency_key: "tf-2".into(),
             event_time: None,
             tags: Some(vec!["python".into()]),
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -1170,10 +1256,15 @@ async fn search_with_min_similarity_filters_low_scores() {
             idempotency_key: "ms-1".into(),
             event_time: None,
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -1223,10 +1314,15 @@ async fn truncated_false_when_all_results_fit() {
                 idempotency_key: format!("tr-{i}"),
                 event_time: None,
                 tags: None,
-                source: None,
+        
                 metadata: None,
                 memory_type: None,
                 external_refs: None,
+                applies_to_domains: None,
+                applies_to_skills: None,
+                applies_to_projects: None,
+                applies_to_situations: None,
+                confidence: None,
             },
         )
         .await
@@ -1277,10 +1373,15 @@ async fn get_memory_cross_profile_isolation() {
             idempotency_key: "xp-1".into(),
             event_time: None,
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -1322,10 +1423,15 @@ async fn store_with_non_default_memory_type_roundtrips() {
             idempotency_key: "mt-1".into(),
             event_time: None,
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: Some("observation".into()),
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -1372,10 +1478,15 @@ async fn search_memory_types_filter_excludes_non_matching() {
                 idempotency_key: key.into(),
                 event_time: None,
                 tags: None,
-                source: None,
+        
                 metadata: None,
                 memory_type: Some(mt.into()),
                 external_refs: None,
+                applies_to_domains: None,
+                applies_to_skills: None,
+                applies_to_projects: None,
+                applies_to_situations: None,
+                confidence: None,
             },
         )
         .await
@@ -1426,10 +1537,15 @@ async fn invalid_memory_type_store_rejected() {
             idempotency_key: "bad-1".into(),
             event_time: None,
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: Some("bogus".into()),
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await
@@ -1456,10 +1572,15 @@ async fn search_returns_score_and_similarity() {
             idempotency_key: "sc-1".into(),
             event_time: None,
             tags: None,
-            source: None,
+    
             metadata: None,
             memory_type: None,
             external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
         },
     )
     .await

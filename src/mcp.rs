@@ -173,7 +173,7 @@ impl ChittaServer {
 impl ServerHandler for ChittaServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "chitta v0.1.0 — agent-native persistent memory. \
+            "chitta v0.3.0 — working model of Josh. \
                  Seven tools: store_memory, get_memory, search_memories, \
                  update_memory, delete_memory, list_recent_memories, health_check. \
                  Profiles isolate namespaces; idempotency_key dedupes writes; \

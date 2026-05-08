@@ -33,9 +33,6 @@ pub struct UpdateArgs {
     /// New tags. Replaces the existing tag list entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
-    /// New source provenance.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
     /// New metadata. Replaces existing metadata entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
@@ -55,8 +52,6 @@ pub struct UpdateOutput {
     pub event_time: DateTime<Utc>,
     pub record_time: DateTime<Utc>,
     pub tags: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
     pub memory_type: String,
@@ -80,7 +75,6 @@ pub async fn handle(
 
     if args.content.is_none()
         && args.tags.is_none()
-        && args.source.is_none()
         && args.metadata.is_none()
         && args.memory_type.is_none()
         && args.external_refs.is_none()
@@ -88,7 +82,7 @@ pub async fn handle(
         return Err(ChittaError::InvalidArgument {
             tool: TOOL,
             argument: "fields".to_string(),
-            constraint: "at least one of content, tags, source, metadata, memory_type, or external_refs must be provided".to_string(),
+            constraint: "at least one of content, tags, metadata, memory_type, or external_refs must be provided".to_string(),
             received: None,
             next_action: "Provide at least one field to update.".to_string(),
         });
@@ -126,10 +120,9 @@ pub async fn handle(
             id,
             content: args.content.as_deref(),
             embedding: embedding.as_ref(),
-            tags: args.tags.as_deref(),
-            source: args.source.as_deref(),
-            metadata: args.metadata.as_ref(),
             sparse_embedding: sparse_embedding.as_ref(),
+            tags: args.tags.as_deref(),
+            metadata: args.metadata.as_ref(),
             memory_type: args.memory_type.as_deref(),
             external_refs: args.external_refs.as_ref(),
         },
@@ -150,7 +143,6 @@ pub async fn handle(
         event_time: row.event_time,
         record_time: row.record_time,
         tags: row.tags,
-        source: row.source,
         metadata: row.metadata,
         memory_type: row.memory_type,
         external_refs: row.external_refs,
