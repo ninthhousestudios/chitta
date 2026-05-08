@@ -12,3 +12,4 @@ pub mod ingest;
 pub mod mcp;
 pub mod retrieval;
 pub mod tools;
+pub mod validators;

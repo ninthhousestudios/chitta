@@ -709,3 +709,97 @@ fn episode_derivation_validation_accepts_valid() {
     }]);
     assert!(validate::episode_derivations("store_memory", "episode", &derivs).is_ok());
 }
+
+// ---- Decision validation contract ------------------------------------
+
+#[test]
+fn decision_missing_metadata_rejected() {
+    use chitta::validators;
+    let r = validators::validate_decision_metadata("store_memory", "decision", &None);
+    assert!(r.is_err());
+    let err = r.unwrap_err();
+    match &err {
+        ChittaError::InvalidArgument {
+            argument,
+            next_action,
+            ..
+        } => {
+            assert_eq!(argument, "metadata");
+            assert!(
+                next_action.contains("observation"),
+                "next_action should mention demoting to observation"
+            );
+            assert!(
+                next_action.contains("yojana"),
+                "next_action should mention routing to yojana"
+            );
+        }
+        other => panic!("expected InvalidArgument, got: {other:?}"),
+    }
+}
+
+#[test]
+fn decision_missing_rationale_rejected() {
+    use chitta::validators;
+    let meta = Some(json!({"rejected_alternatives": ["B"]}));
+    let r = validators::validate_decision_metadata("store_memory", "decision", &meta);
+    assert!(r.is_err());
+    match r.unwrap_err() {
+        ChittaError::InvalidArgument { argument, .. } => {
+            assert_eq!(argument, "metadata.rationale");
+        }
+        other => panic!("expected InvalidArgument, got: {other:?}"),
+    }
+}
+
+#[test]
+fn decision_empty_rationale_rejected() {
+    use chitta::validators;
+    let meta = Some(json!({"rationale": "", "rejected_alternatives": ["B"]}));
+    let r = validators::validate_decision_metadata("store_memory", "decision", &meta);
+    assert!(r.is_err());
+    match r.unwrap_err() {
+        ChittaError::InvalidArgument { argument, .. } => {
+            assert_eq!(argument, "metadata.rationale");
+        }
+        other => panic!("expected InvalidArgument, got: {other:?}"),
+    }
+}
+
+#[test]
+fn decision_empty_alternatives_rejected() {
+    use chitta::validators;
+    let meta = Some(json!({"rationale": "good reason", "rejected_alternatives": []}));
+    let r = validators::validate_decision_metadata("store_memory", "decision", &meta);
+    assert!(r.is_err());
+    match r.unwrap_err() {
+        ChittaError::InvalidArgument { argument, .. } => {
+            assert_eq!(argument, "metadata.rejected_alternatives");
+        }
+        other => panic!("expected InvalidArgument, got: {other:?}"),
+    }
+}
+
+#[test]
+fn decision_missing_alternatives_rejected() {
+    use chitta::validators;
+    let meta = Some(json!({"rationale": "good reason"}));
+    let r = validators::validate_decision_metadata("store_memory", "decision", &meta);
+    assert!(r.is_err());
+    match r.unwrap_err() {
+        ChittaError::InvalidArgument { argument, .. } => {
+            assert_eq!(argument, "metadata.rejected_alternatives");
+        }
+        other => panic!("expected InvalidArgument, got: {other:?}"),
+    }
+}
+
+#[test]
+fn decision_happy_path_accepted() {
+    use chitta::validators;
+    let meta = Some(json!({
+        "rationale": "chose X because of Y",
+        "rejected_alternatives": ["option A was too slow"]
+    }));
+    assert!(validators::validate_decision_metadata("store_memory", "decision", &meta).is_ok());
+}

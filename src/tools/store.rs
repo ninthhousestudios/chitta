@@ -17,6 +17,7 @@ use crate::db::{self, MemoryRow};
 use crate::embedding::Embedder;
 use crate::error::{ChittaError, Result};
 use crate::tools::validate;
+use crate::validators;
 pub use crate::tools::validate::DerivationInput;
 
 const TOOL: &str = "store_memory";
@@ -122,6 +123,7 @@ pub async fn handle(
         validate::external_refs(TOOL, refs)?;
     }
     validate::episode_derivations(TOOL, &memory_type, &args.derivations)?;
+    validators::validate_decision_metadata(TOOL, &memory_type, &args.metadata)?;
 
     if let Some(existing) =
         db::find_by_idempotency_key(pool, &args.profile, &args.idempotency_key).await?
