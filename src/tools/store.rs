@@ -117,7 +117,9 @@ pub async fn handle(
     }
     let tags = args.tags.unwrap_or_default();
     validate::tags(TOOL, &tags)?;
-    let memory_type = args.memory_type.unwrap_or_else(|| "observation".to_string());
+    let memory_type = args
+        .memory_type
+        .unwrap_or_else(|| "observation".to_string());
     validators::memory_type(TOOL, &memory_type)?;
     if let Some(ref refs) = args.external_refs {
         validators::external_refs(TOOL, refs)?;

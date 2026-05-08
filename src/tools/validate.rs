@@ -204,16 +204,16 @@ pub fn ref_filter(tool: &'static str, rf: &super::search::RefFilter) -> Result<(
             next_action: format!("Use a valid kind: {}", VALID_REF_KINDS.join(", ")),
         });
     }
-    if let Some(ref val) = rf.ref_value {
-        if val.is_empty() {
-            return Err(ChittaError::InvalidArgument {
-                tool,
-                argument: "ref_filter.ref".to_string(),
-                constraint: "ref must be non-empty when provided".to_string(),
-                received: Some(json!({"ref": ""})),
-                next_action: "Provide a non-empty ref value or omit the field.".to_string(),
-            });
-        }
+    if let Some(ref val) = rf.ref_value
+        && val.is_empty()
+    {
+        return Err(ChittaError::InvalidArgument {
+            tool,
+            argument: "ref_filter.ref".to_string(),
+            constraint: "ref must be non-empty when provided".to_string(),
+            received: Some(json!({"ref": ""})),
+            next_action: "Provide a non-empty ref value or omit the field.".to_string(),
+        });
     }
     Ok(())
 }
@@ -335,5 +335,4 @@ mod tests {
         let over = "x".repeat(MAX_CONTENT_BYTES + 1);
         assert!(content_byte_length("test_tool", &over).is_err());
     }
-
 }

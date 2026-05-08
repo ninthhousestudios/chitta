@@ -63,17 +63,28 @@ pub async fn handle(pool: &PgPool, args: GetProfileArgs) -> Result<GetProfileOut
         .into_iter()
         .map(|row| {
             let confidence = row.confidence.unwrap_or(0.0);
-            let es = scoring::effective_score(
-                confidence,
-                row.last_reinforced_at,
-                row.record_time,
-                now,
-            );
+            let es =
+                scoring::effective_score(confidence, row.last_reinforced_at, row.record_time, now);
             (es, row)
         })
         .collect();
 
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                let a_lr = a.1.last_reinforced_at.as_ref();
+                let b_lr = b.1.last_reinforced_at.as_ref();
+                match (b_lr, a_lr) {
+                    (Some(b_t), Some(a_t)) => b_t.cmp(a_t),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+            })
+            .then_with(|| b.1.record_time.cmp(&a.1.record_time))
+            .then_with(|| a.1.id.cmp(&b.1.id))
+    });
     scored.truncate(PROFILE_LIMIT);
 
     let truncated = total_candidates > PROFILE_LIMIT;

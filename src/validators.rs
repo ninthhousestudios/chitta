@@ -9,8 +9,7 @@ use uuid::Uuid;
 
 use crate::error::{ChittaError, Result};
 
-const DECISION_ERROR_MSG: &str =
-    "decision memory requires `metadata.rationale` and at least one \
+const DECISION_ERROR_MSG: &str = "decision memory requires `metadata.rationale` and at least one \
      `metadata.rejected_alternatives` entry. Either supply them, demote \
      to memory_type=observation, or route to yojana.";
 
@@ -36,13 +35,15 @@ pub fn validate_decision_metadata(
         Some(v) => v,
     };
 
-    let obj = meta.as_object().ok_or_else(|| ChittaError::InvalidArgument {
-        tool,
-        argument: "metadata".to_string(),
-        constraint: DECISION_ERROR_MSG.to_string(),
-        received: Some(meta.clone()),
-        next_action: DECISION_ERROR_MSG.to_string(),
-    })?;
+    let obj = meta
+        .as_object()
+        .ok_or_else(|| ChittaError::InvalidArgument {
+            tool,
+            argument: "metadata".to_string(),
+            constraint: DECISION_ERROR_MSG.to_string(),
+            received: Some(meta.clone()),
+            next_action: DECISION_ERROR_MSG.to_string(),
+        })?;
 
     match obj.get("rationale").and_then(|v| v.as_str()) {
         None | Some("") => {
@@ -176,7 +177,9 @@ pub fn episode_derivations(
                         argument: "derivations".to_string(),
                         constraint: "derivation_type must be non-empty".to_string(),
                         received: Some(json!({"index": i, "derivation_type": ""})),
-                        next_action: "Pass a non-empty derivation_type (e.g. \"synthesised_from\").".to_string(),
+                        next_action:
+                            "Pass a non-empty derivation_type (e.g. \"synthesised_from\")."
+                                .to_string(),
                     });
                 }
             }

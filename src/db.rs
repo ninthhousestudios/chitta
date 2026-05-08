@@ -96,6 +96,7 @@ pub struct QueryLogInput<'a> {
     pub profile: &'a str,
     pub query_text: &'a str,
     pub embedding: &'a Vector,
+    pub sparse_embedding: Option<&'a serde_json::Value>,
     pub k: i64,
     pub min_similarity: f32,
     pub tags: &'a [String],
@@ -515,7 +516,6 @@ pub async fn search_by_embedding(
     Ok((hits, total))
 }
 
-
 pub async fn fetch_sparse_embeddings(
     pool: &PgPool,
     ids: &[Uuid],
@@ -584,6 +584,7 @@ pub struct QueryLogEntry {
     pub profile: String,
     pub query_text: String,
     pub embedding: Vector,
+    pub sparse_embedding: Option<serde_json::Value>,
     pub k: i32,
     pub min_similarity: f32,
     pub tags: Vec<String>,
@@ -605,8 +606,9 @@ pub async fn read_query_log(
 ) -> Result<Vec<QueryLogEntry>> {
     let rows = sqlx::query_as::<_, QueryLogEntry>(
         r#"
-        SELECT id, profile, query_text, embedding, k, min_similarity, tags, memory_types,
-               result_ids, result_scores, total_available, truncated, latency_ms, created_at
+        SELECT id, profile, query_text, embedding, sparse_embedding, k, min_similarity,
+               tags, memory_types, result_ids, result_scores, total_available, truncated,
+               latency_ms, created_at
         FROM query_log
         WHERE ($1::text IS NULL OR profile = $1)
         ORDER BY created_at DESC
@@ -626,14 +628,16 @@ pub async fn insert_query_log(pool: &PgPool, e: &QueryLogInput<'_>) -> Result<()
     sqlx::query(
         r#"
         INSERT INTO query_log
-            (profile, query_text, embedding, k, min_similarity, tags, memory_types,
-             result_ids, result_scores, total_available, truncated, latency_ms)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            (profile, query_text, embedding, sparse_embedding, k, min_similarity,
+             tags, memory_types, result_ids, result_scores, total_available, truncated,
+             latency_ms)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         "#,
     )
     .bind(e.profile)
     .bind(e.query_text)
     .bind(e.embedding)
+    .bind(e.sparse_embedding)
     .bind(e.k as i32)
     .bind(e.min_similarity)
     .bind(e.tags)
@@ -776,11 +780,7 @@ pub async fn get_derivations_for(pool: &PgPool, derived_id: Uuid) -> Result<Vec<
     Ok(rows)
 }
 
-pub async fn supersede_memory(
-    pool: &PgPool,
-    old_id: Uuid,
-    new_id: Uuid,
-) -> Result<DerivationRow> {
+pub async fn supersede_memory(pool: &PgPool, old_id: Uuid, new_id: Uuid) -> Result<DerivationRow> {
     let mut tx = pool.begin().await?;
 
     sqlx::query("UPDATE memories SET superseded_by = $1 WHERE id = $2")
@@ -879,7 +879,7 @@ pub async fn fetch_raw_since(
     profile: &str,
     since: Option<DateTime<Utc>>,
 ) -> Result<Vec<MemoryRow>> {
-    let since = since.unwrap_or_else(|| DateTime::UNIX_EPOCH);
+    let since = since.unwrap_or(DateTime::UNIX_EPOCH);
     let rows = sqlx::query_as::<_, MemoryRow>(
         r#"
         SELECT id, profile, content, embedding, sparse_embedding,

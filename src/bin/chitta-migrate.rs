@@ -22,14 +22,18 @@ use chitta::db::{self, MemoryRow};
 use chitta::embedding::Embedder;
 use chitta::error::ChittaError;
 use chitta::tools::validate;
-use chitta::validators::DerivationInput;
 use chitta::validators;
+use chitta::validators::DerivationInput;
 
 const SEED_TAG: &str = "seed:2026-05";
 const TOOL: &str = "chitta-migrate";
 
 #[derive(Parser)]
-#[command(name = "chitta-migrate", version, about = "Export/seed migration tool for chitta DB")]
+#[command(
+    name = "chitta-migrate",
+    version,
+    about = "Export/seed migration tool for chitta DB"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -148,7 +152,11 @@ async fn build_export_query(pool: &PgPool) -> Result<String> {
 
     let has = |name: &str| columns.iter().any(|c| c == name);
 
-    let mut parts: Vec<String> = vec!["'id', id".into(), "'profile', profile".into(), "'content', content".into()];
+    let mut parts: Vec<String> = vec![
+        "'id', id".into(),
+        "'profile', profile".into(),
+        "'content', content".into(),
+    ];
 
     if has("event_time") {
         parts.push("'event_time', event_time".into());
@@ -231,7 +239,10 @@ async fn run_seed(from_path: &str, dry_run: bool) -> Result<()> {
         }
     }
 
-    eprintln!("\nvalidation: {} ok, {reject_count} rejected", ok_rows.len());
+    eprintln!(
+        "\nvalidation: {} ok, {reject_count} rejected",
+        ok_rows.len()
+    );
 
     if dry_run {
         eprintln!("dry-run complete. No rows written.");
@@ -244,9 +255,7 @@ async fn run_seed(from_path: &str, dry_run: bool) -> Result<()> {
     }
 
     let cfg = Config::from_env().context("loading config (need DATABASE_URL + model path)")?;
-    let pool = db::connect(&cfg)
-        .await
-        .context("connecting to target DB")?;
+    let pool = db::connect(&cfg).await.context("connecting to target DB")?;
     db::run_migrations(&pool)
         .await
         .context("running migrations on target")?;
@@ -323,10 +332,8 @@ fn validate_row(row: &MigrateRow) -> std::result::Result<(), String> {
         validators::external_refs(TOOL, refs).map_err(format_err)?;
     }
 
-    validators::validate_decision_metadata(TOOL, memory_type, &row.metadata)
-        .map_err(format_err)?;
-    validators::episode_derivations(TOOL, memory_type, &row.derivations)
-        .map_err(format_err)?;
+    validators::validate_decision_metadata(TOOL, memory_type, &row.metadata).map_err(format_err)?;
+    validators::episode_derivations(TOOL, memory_type, &row.derivations).map_err(format_err)?;
 
     Ok(())
 }
@@ -345,9 +352,7 @@ async fn seed_one_row(pool: &PgPool, embedder: &Arc<Embedder>, row: MigrateRow) 
     let now = Utc::now();
     let memory_type = row.memory_type.unwrap_or_else(|| "observation".to_string());
     let id = row.id.unwrap_or_else(Uuid::now_v7);
-    let idempotency_key = row
-        .idempotency_key
-        .unwrap_or_else(|| format!("seed-{id}"));
+    let idempotency_key = row.idempotency_key.unwrap_or_else(|| format!("seed-{id}"));
     let event_time = row.event_time.unwrap_or(now);
 
     let mut tags = row.tags.unwrap_or_default();
@@ -474,8 +479,7 @@ mod tests {
 
     #[test]
     fn fixture_file_validates() {
-        let fixture_path =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/migrate/fixture.jsonl");
+        let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/migrate/fixture.jsonl");
         let rows = read_jsonl(fixture_path).expect("fixture should parse");
         assert!(rows.len() >= 5, "fixture needs at least 5 rows");
 
@@ -488,6 +492,9 @@ mod tests {
             }
         }
         assert!(pass >= 4, "at least 4 rows should pass, got {pass}");
-        assert!(fail >= 1, "at least 1 row should fail (deliberate), got {fail}");
+        assert!(
+            fail >= 1,
+            "at least 1 row should fail (deliberate), got {fail}"
+        );
     }
 }

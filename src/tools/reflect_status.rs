@@ -97,9 +97,7 @@ pub async fn handle(pool: &PgPool, args: ReflectStatusArgs) -> Result<ReflectSta
             _ => {}
         }
 
-        if row.tags.iter().any(|t| t == "feedback")
-            && row.tags.iter().any(|t| t == "disagree")
-        {
+        if row.tags.iter().any(|t| t == "feedback") && row.tags.iter().any(|t| t == "disagree") {
             let snippet: String = row.content.chars().take(120).collect();
             disagree_flagged.push(DisagreeFlagged {
                 memory_id: row.id,
@@ -121,13 +119,7 @@ pub async fn handle(pool: &PgPool, args: ReflectStatusArgs) -> Result<ReflectSta
         "disagree_flagged_count": disagree_flagged.len(),
     });
 
-    let run = db::insert_reflect_run(
-        pool,
-        &args.profile,
-        total as i32,
-        Some(summary_json),
-    )
-    .await?;
+    let run = db::insert_reflect_run(pool, &args.profile, total as i32, Some(summary_json)).await?;
 
     Ok(ReflectStatusOutput {
         profile: args.profile,

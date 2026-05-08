@@ -8,7 +8,7 @@
 use chitta::envelope::Envelope;
 use chitta::error::{ChittaError, codes};
 use chitta::tools::{
-    AppliesTo, DerivationInput, DeleteArgs, DeleteOutput, GetArgs, GetOutput, GetProfileArgs,
+    DeleteArgs, DeleteOutput, DerivationInput, GetArgs, GetOutput, GetProfileArgs,
     GetProfileOutput, ListArgs, ListItem, ListOutput, ReflectStatusArgs, SearchArgs, SearchHit,
     SearchOutput, StoreArgs, StoreOutput, SupersedeArgs, SupersedeOutput, UpdateArgs, UpdateOutput,
 };

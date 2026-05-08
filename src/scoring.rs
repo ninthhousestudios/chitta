@@ -31,7 +31,10 @@ mod tests {
     fn day_zero_equals_confidence() {
         let now = utc(2026, 5, 8);
         let score = effective_score(0.80, None, now, now);
-        assert!((score - 0.80).abs() < 1e-6, "day-0 score should equal confidence, got {score}");
+        assert!(
+            (score - 0.80).abs() < 1e-6,
+            "day-0 score should equal confidence, got {score}"
+        );
     }
 
     #[test]
@@ -52,7 +55,10 @@ mod tests {
         let now = utc(2026, 5, 8);
         let score = effective_score(0.90, None, record, now);
         assert!(score > 0.0, "score should be nonzero even after 1+ year");
-        assert!(score < 0.20, "score should be small after 1+ year, got {score}");
+        assert!(
+            score < 0.20,
+            "score should be small after 1+ year, got {score}"
+        );
     }
 
     #[test]
@@ -74,7 +80,10 @@ mod tests {
         let now = utc(2026, 5, 8);
         let score = effective_score(0.80, Some(reinforced), record, now);
         // Only 7 days of decay from reinforcement, not 490+ from record_time
-        assert!(score > 0.75, "recent reinforcement should keep score high, got {score}");
+        assert!(
+            score > 0.75,
+            "recent reinforcement should keep score high, got {score}"
+        );
     }
 
     #[test]

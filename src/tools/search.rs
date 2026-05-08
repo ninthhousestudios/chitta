@@ -330,6 +330,11 @@ pub async fn handle(
         let log_profile = profile.clone();
         let log_query = query.clone();
         let log_embedding = query_vec.clone();
+        let log_sparse = if embed_out.sparse.is_empty() {
+            None
+        } else {
+            serde_json::to_value(&embed_out.sparse).ok()
+        };
         let log_tags = tags.clone();
         let log_memory_types = memory_types.clone();
         let log_total = Some(total_available);
@@ -341,6 +346,7 @@ pub async fn handle(
                     profile: &log_profile,
                     query_text: &log_query,
                     embedding: &log_embedding,
+                    sparse_embedding: log_sparse.as_ref(),
                     k,
                     min_similarity,
                     tags: &log_tags,

@@ -62,17 +62,16 @@ pub async fn handle(pool: &PgPool, args: SupersedeArgs) -> Result<SupersedeOutpu
         });
     }
 
-    let old_row =
-        db::get_memory_by_id(pool, &args.profile, old_id)
-            .await?
-            .ok_or_else(|| ChittaError::NotFound {
-                tool: TOOL,
-                kind: "memory",
-                next_action: format!(
-                    "old_id {old_id} not found in profile '{}'. Check the id and profile.",
-                    args.profile
-                ),
-            })?;
+    let old_row = db::get_memory_by_id(pool, &args.profile, old_id)
+        .await?
+        .ok_or_else(|| ChittaError::NotFound {
+            tool: TOOL,
+            kind: "memory",
+            next_action: format!(
+                "old_id {old_id} not found in profile '{}'. Check the id and profile.",
+                args.profile
+            ),
+        })?;
 
     if old_row.invalidated_at.is_some() {
         return Err(ChittaError::InvalidArgument {
@@ -86,16 +85,13 @@ pub async fn handle(pool: &PgPool, args: SupersedeArgs) -> Result<SupersedeOutpu
         });
     }
 
-    if old_row.superseded_by.is_some() {
+    if let Some(by) = old_row.superseded_by {
         return Err(ChittaError::InvalidArgument {
             tool: TOOL,
             argument: "old_id".into(),
             constraint: "must not already be superseded".into(),
             received: Some(serde_json::json!(args.old_id)),
-            next_action: format!(
-                "Memory {old_id} is already superseded by {}.",
-                old_row.superseded_by.unwrap()
-            ),
+            next_action: format!("Memory {old_id} is already superseded by {by}."),
         });
     }
 
