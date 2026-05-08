@@ -13,6 +13,7 @@ use crate::db;
 use crate::error::{ChittaError, Result};
 use crate::tools::search::prefix_chars;
 use crate::tools::validate;
+use crate::validators;
 
 const TOOL: &str = "list_recent_memories";
 
@@ -88,7 +89,7 @@ pub async fn handle(pool: &PgPool, args: ListArgs) -> Result<ListOutput> {
     let tags = args.tags.unwrap_or_default();
     validate::tags(TOOL, &tags)?;
     let memory_types = args.memory_types.unwrap_or_default();
-    validate::memory_types(TOOL, &memory_types)?;
+    validators::memory_types(TOOL, &memory_types)?;
 
     let (rows, total_in_profile) =
         db::list_recent_with_count(pool, &args.profile, limit, &tags, &memory_types).await?;

@@ -132,7 +132,7 @@ impl Config {
 }
 
 fn parse_type_weights(s: &str) -> HashMap<String, f32> {
-    use crate::tools::validate::VALID_MEMORY_TYPES;
+    use crate::validators::VALID_MEMORY_TYPES;
 
     let mut map = HashMap::new();
     for pair in s.split(',') {

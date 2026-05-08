@@ -16,6 +16,7 @@ use crate::db;
 use crate::embedding::Embedder;
 use crate::error::{ChittaError, Result};
 use crate::tools::validate;
+use crate::validators;
 
 const TOOL: &str = "update_memory";
 
@@ -96,10 +97,10 @@ pub async fn handle(
         validate::tags(TOOL, tags)?;
     }
     if let Some(ref mt) = args.memory_type {
-        validate::memory_type(TOOL, mt)?;
+        validators::memory_type(TOOL, mt)?;
     }
     if let Some(ref refs) = args.external_refs {
-        validate::external_refs(TOOL, refs)?;
+        validators::external_refs(TOOL, refs)?;
     }
 
     // If content changed, re-embed (both dense and sparse).

@@ -1,12 +1,16 @@
-//! Argument validation. One rule per fn; each returns an
+//! Cross-tool argument sanitisers. One rule per fn; each returns an
 //! [`InvalidArgument`](crate::error::ChittaError::InvalidArgument) with a
 //! populated `constraint` + `next_action` on failure (Principle 8).
+//!
+//! Domain contract validators (memory types, derivation rules, external ref
+//! shapes) live in [`crate::validators`].
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::error::{ChittaError, Result};
+use crate::validators::VALID_REF_KINDS;
 
 /// Profile: 1-128 chars, `[a-zA-Z0-9_-]+`.
 pub fn profile(tool: &'static str, value: &str) -> Result<()> {
@@ -190,107 +194,6 @@ pub fn max_tokens(tool: &'static str, value: u64) -> Result<()> {
     Ok(())
 }
 
-pub const VALID_MEMORY_TYPES: &[&str] = &[
-    "observation",
-    "episode",
-    "decision",
-    "trait",
-    "value",
-    "pattern",
-    "preference",
-    "mental_model",
-];
-
-pub fn memory_type(tool: &'static str, value: &str) -> Result<()> {
-    if !VALID_MEMORY_TYPES.contains(&value) {
-        return Err(ChittaError::InvalidArgument {
-            tool,
-            argument: "memory_type".to_string(),
-            constraint: format!("one of: {}", VALID_MEMORY_TYPES.join(", ")),
-            received: Some(json!(value)),
-            next_action: format!("Use one of: {}", VALID_MEMORY_TYPES.join(", ")),
-        });
-    }
-    Ok(())
-}
-
-pub fn memory_types(tool: &'static str, values: &[String]) -> Result<()> {
-    for v in values {
-        memory_type(tool, v)?;
-    }
-    Ok(())
-}
-
-/// Derivation input from the caller (before UUID parsing).
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct DerivationInput {
-    /// UUID of the source memory this derivation links to.
-    pub source_id: String,
-    /// Type of derivation (e.g. "synthesised_from", "supersedes").
-    pub derivation_type: String,
-}
-
-pub fn episode_derivations(
-    tool: &'static str,
-    memory_type: &str,
-    derivations: &Option<Vec<DerivationInput>>,
-) -> Result<()> {
-    if memory_type != "episode" {
-        return Ok(());
-    }
-    match derivations {
-        None => {
-            return Err(ChittaError::InvalidArgument {
-                tool,
-                argument: "derivations".to_string(),
-                constraint: "episode memory requires at least one derivation".to_string(),
-                received: Some(json!(null)),
-                next_action: "episode memory requires at least one entry in derivations \
-                    linking to source observations. Either supply derivations, \
-                    or use memory_type=observation."
-                    .to_string(),
-            });
-        }
-        Some(v) if v.is_empty() => {
-            return Err(ChittaError::InvalidArgument {
-                tool,
-                argument: "derivations".to_string(),
-                constraint: "episode memory requires at least one derivation".to_string(),
-                received: Some(json!([])),
-                next_action: "episode memory requires at least one entry in derivations \
-                    linking to source observations. Either supply derivations, \
-                    or use memory_type=observation."
-                    .to_string(),
-            });
-        }
-        Some(v) => {
-            for (i, d) in v.iter().enumerate() {
-                parse_uuid(tool, "derivations[].source_id", &d.source_id).map_err(|_| {
-                    ChittaError::InvalidArgument {
-                        tool,
-                        argument: "derivations".to_string(),
-                        constraint: "source_id must be a valid UUID".to_string(),
-                        received: Some(json!({"index": i, "source_id": &d.source_id})),
-                        next_action: "Pass a valid UUID for source_id.".to_string(),
-                    }
-                })?;
-                if d.derivation_type.is_empty() {
-                    return Err(ChittaError::InvalidArgument {
-                        tool,
-                        argument: "derivations".to_string(),
-                        constraint: "derivation_type must be non-empty".to_string(),
-                        received: Some(json!({"index": i, "derivation_type": ""})),
-                        next_action: "Pass a non-empty derivation_type (e.g. \"synthesised_from\").".to_string(),
-                    });
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-pub const VALID_REF_KINDS: &[&str] = &["file", "commit", "yojana_task", "memory", "url", "session"];
-
 pub fn ref_filter(tool: &'static str, rf: &super::search::RefFilter) -> Result<()> {
     if !VALID_REF_KINDS.contains(&rf.kind.as_str()) {
         return Err(ChittaError::InvalidArgument {
@@ -313,88 +216,6 @@ pub fn ref_filter(tool: &'static str, rf: &super::search::RefFilter) -> Result<(
         }
     }
     Ok(())
-}
-
-/// External refs: JSON array of `{"kind": "<type>", "ref": "<value>"}`.
-pub fn external_refs(tool: &'static str, value: &serde_json::Value) -> Result<()> {
-    let arr = value
-        .as_array()
-        .ok_or_else(|| ChittaError::InvalidArgument {
-            tool,
-            argument: "external_refs".to_string(),
-            constraint: "must be a JSON array".to_string(),
-            received: Some(json!({"type": value_type_name(value)})),
-            next_action:
-                r#"Pass external_refs as an array: [{"kind": "file", "ref": "path/to/file"}]."#
-                    .to_string(),
-        })?;
-    for (i, entry) in arr.iter().enumerate() {
-        let obj = entry
-            .as_object()
-            .ok_or_else(|| ChittaError::InvalidArgument {
-                tool,
-                argument: "external_refs".to_string(),
-                constraint:
-                    "each element must be an object with \"kind\" and \"ref\" string fields"
-                        .to_string(),
-                received: Some(json!({"index": i, "type": value_type_name(entry)})),
-                next_action: r#"Each element must be {"kind": "<type>", "ref": "<value>"}."#
-                    .to_string(),
-            })?;
-        let kind = obj.get("kind").and_then(|v| v.as_str()).ok_or_else(|| {
-            ChittaError::InvalidArgument {
-                tool,
-                argument: "external_refs".to_string(),
-                constraint: "each element must have a string \"kind\" field".to_string(),
-                received: Some(json!({"index": i})),
-                next_action: format!(
-                    "Add a \"kind\" field. Valid kinds: {}",
-                    VALID_REF_KINDS.join(", ")
-                ),
-            }
-        })?;
-        if !VALID_REF_KINDS.contains(&kind) {
-            return Err(ChittaError::InvalidArgument {
-                tool,
-                argument: "external_refs".to_string(),
-                constraint: format!("kind must be one of: {}", VALID_REF_KINDS.join(", ")),
-                received: Some(json!({"index": i, "kind": kind})),
-                next_action: format!("Use a valid kind: {}", VALID_REF_KINDS.join(", ")),
-            });
-        }
-        let ref_val = obj
-            .get("ref")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ChittaError::InvalidArgument {
-                tool,
-                argument: "external_refs".to_string(),
-                constraint: "each element must have a non-empty string \"ref\" field".to_string(),
-                received: Some(json!({"index": i})),
-                next_action: r#"Add a "ref" field with the reference value (e.g. a file path, URL, or UUID)."#
-                    .to_string(),
-            })?;
-        if ref_val.is_empty() {
-            return Err(ChittaError::InvalidArgument {
-                tool,
-                argument: "external_refs".to_string(),
-                constraint: "\"ref\" must be non-empty".to_string(),
-                received: Some(json!({"index": i, "ref": ""})),
-                next_action: "Provide a non-empty ref value.".to_string(),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn value_type_name(v: &serde_json::Value) -> &'static str {
-    match v {
-        serde_json::Value::Null => "null",
-        serde_json::Value::Bool(_) => "bool",
-        serde_json::Value::Number(_) => "number",
-        serde_json::Value::String(_) => "string",
-        serde_json::Value::Array(_) => "array",
-        serde_json::Value::Object(_) => "object",
-    }
 }
 
 /// Parse a UUID argument, translating parse errors to a populated
@@ -515,117 +336,4 @@ mod tests {
         assert!(content_byte_length("test_tool", &over).is_err());
     }
 
-    #[test]
-    fn memory_type_rules() {
-        for valid in VALID_MEMORY_TYPES {
-            assert!(memory_type("t", valid).is_ok(), "{valid} should be valid");
-        }
-        assert!(memory_type("t", "bogus").is_err());
-        assert!(memory_type("t", "Memory").is_err());
-        assert!(memory_type("t", "").is_err());
-    }
-
-    #[test]
-    fn memory_types_rules() {
-        assert!(memory_types("t", &["observation".into(), "decision".into()]).is_ok());
-        assert!(memory_types("t", &["observation".into(), "bogus".into()]).is_err());
-        assert!(memory_types("t", &[]).is_ok());
-    }
-
-    #[test]
-    fn external_refs_valid() {
-        let v = json!([{"kind": "file", "ref": "src/main.rs"}]);
-        assert!(external_refs("t", &v).is_ok());
-
-        let multi = json!([
-            {"kind": "file", "ref": "a.rs"},
-            {"kind": "commit", "ref": "abc123"},
-            {"kind": "url", "ref": "https://example.com"},
-        ]);
-        assert!(external_refs("t", &multi).is_ok());
-
-        assert!(external_refs("t", &json!([])).is_ok());
-    }
-
-    #[test]
-    fn external_refs_not_array() {
-        assert!(external_refs("t", &json!({"kind": "file", "ref": "x"})).is_err());
-        assert!(external_refs("t", &json!("string")).is_err());
-    }
-
-    #[test]
-    fn external_refs_bad_element() {
-        assert!(external_refs("t", &json!(["not an object"])).is_err());
-        assert!(external_refs("t", &json!([{"kind": "file"}])).is_err());
-        assert!(external_refs("t", &json!([{"ref": "x"}])).is_err());
-    }
-
-    #[test]
-    fn external_refs_invalid_kind() {
-        assert!(external_refs("t", &json!([{"kind": "bogus", "ref": "x"}])).is_err());
-    }
-
-    #[test]
-    fn external_refs_empty_ref() {
-        assert!(external_refs("t", &json!([{"kind": "file", "ref": ""}])).is_err());
-    }
-
-    fn deriv(source_id: &str, dtype: &str) -> DerivationInput {
-        DerivationInput {
-            source_id: source_id.to_string(),
-            derivation_type: dtype.to_string(),
-        }
-    }
-
-    #[test]
-    fn episode_derivations_rejects_none() {
-        let r = episode_derivations("t", "episode", &None);
-        assert!(r.is_err());
-        let msg = r.unwrap_err().to_string();
-        assert!(msg.contains("derivations"), "{msg}");
-    }
-
-    #[test]
-    fn episode_derivations_rejects_empty() {
-        let r = episode_derivations("t", "episode", &Some(vec![]));
-        assert!(r.is_err());
-    }
-
-    #[test]
-    fn episode_derivations_happy_path() {
-        let valid_uuid = "019e0725-aab3-7160-905b-a150603d16d9";
-        let derivs = Some(vec![deriv(valid_uuid, "synthesised_from")]);
-        assert!(episode_derivations("t", "episode", &derivs).is_ok());
-    }
-
-    #[test]
-    fn episode_derivations_multiple() {
-        let u1 = "019e0725-aab3-7160-905b-a150603d16d9";
-        let u2 = "019e0725-aab3-7160-905b-a150603d16da";
-        let derivs = Some(vec![
-            deriv(u1, "synthesised_from"),
-            deriv(u2, "synthesised_from"),
-        ]);
-        assert!(episode_derivations("t", "episode", &derivs).is_ok());
-    }
-
-    #[test]
-    fn episode_derivations_invalid_uuid() {
-        let derivs = Some(vec![deriv("not-a-uuid", "synthesised_from")]);
-        assert!(episode_derivations("t", "episode", &derivs).is_err());
-    }
-
-    #[test]
-    fn episode_derivations_empty_type() {
-        let valid_uuid = "019e0725-aab3-7160-905b-a150603d16d9";
-        let derivs = Some(vec![deriv(valid_uuid, "")]);
-        assert!(episode_derivations("t", "episode", &derivs).is_err());
-    }
-
-    #[test]
-    fn non_episode_ignores_derivations() {
-        assert!(episode_derivations("t", "observation", &None).is_ok());
-        assert!(episode_derivations("t", "observation", &Some(vec![])).is_ok());
-        assert!(episode_derivations("t", "decision", &None).is_ok());
-    }
 }

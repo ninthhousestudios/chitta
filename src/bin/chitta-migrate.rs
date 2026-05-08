@@ -22,7 +22,7 @@ use chitta::db::{self, MemoryRow};
 use chitta::embedding::Embedder;
 use chitta::error::ChittaError;
 use chitta::tools::validate;
-use chitta::tools::validate::DerivationInput;
+use chitta::validators::DerivationInput;
 use chitta::validators;
 
 const SEED_TAG: &str = "seed:2026-05";
@@ -314,18 +314,18 @@ fn validate_row(row: &MigrateRow) -> std::result::Result<(), String> {
     validate::profile(TOOL, &row.profile).map_err(format_err)?;
     validate::content_non_empty(TOOL, &row.content).map_err(format_err)?;
     validate::content_byte_length(TOOL, &row.content).map_err(format_err)?;
-    validate::memory_type(TOOL, memory_type).map_err(format_err)?;
+    validators::memory_type(TOOL, memory_type).map_err(format_err)?;
 
     if let Some(ref tags) = row.tags {
         validate::tags(TOOL, tags).map_err(format_err)?;
     }
     if let Some(ref refs) = row.external_refs {
-        validate::external_refs(TOOL, refs).map_err(format_err)?;
+        validators::external_refs(TOOL, refs).map_err(format_err)?;
     }
 
     validators::validate_decision_metadata(TOOL, memory_type, &row.metadata)
         .map_err(format_err)?;
-    validate::episode_derivations(TOOL, memory_type, &row.derivations)
+    validators::episode_derivations(TOOL, memory_type, &row.derivations)
         .map_err(format_err)?;
 
     Ok(())

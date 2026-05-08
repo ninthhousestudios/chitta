@@ -668,8 +668,8 @@ fn store_args_non_episode_with_derivations() {
 
 #[test]
 fn episode_derivation_validation_rejects_missing() {
-    use chitta::tools::validate;
-    let r = validate::episode_derivations("store_memory", "episode", &None);
+    use chitta::validators;
+    let r = validators::episode_derivations("store_memory", "episode", &None);
     assert!(r.is_err());
     let err = r.unwrap_err();
     match &err {
@@ -685,8 +685,8 @@ fn episode_derivation_validation_rejects_missing() {
 
 #[test]
 fn episode_derivation_validation_rejects_empty() {
-    use chitta::tools::validate;
-    let r = validate::episode_derivations("store_memory", "episode", &Some(vec![]));
+    use chitta::validators;
+    let r = validators::episode_derivations("store_memory", "episode", &Some(vec![]));
     assert!(r.is_err());
     let err = r.unwrap_err();
     match &err {
@@ -702,12 +702,12 @@ fn episode_derivation_validation_rejects_empty() {
 
 #[test]
 fn episode_derivation_validation_accepts_valid() {
-    use chitta::tools::validate;
+    use chitta::validators;
     let derivs = Some(vec![DerivationInput {
         source_id: "019e0725-aab3-7160-905b-a150603d16d9".to_string(),
         derivation_type: "synthesised_from".to_string(),
     }]);
-    assert!(validate::episode_derivations("store_memory", "episode", &derivs).is_ok());
+    assert!(validators::episode_derivations("store_memory", "episode", &derivs).is_ok());
 }
 
 // ---- Decision validation contract ------------------------------------

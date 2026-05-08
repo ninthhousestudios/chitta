@@ -18,7 +18,7 @@ use crate::embedding::Embedder;
 use crate::error::{ChittaError, Result};
 use crate::tools::validate;
 use crate::validators;
-pub use crate::tools::validate::DerivationInput;
+pub use crate::validators::DerivationInput;
 
 const TOOL: &str = "store_memory";
 
@@ -118,11 +118,11 @@ pub async fn handle(
     let tags = args.tags.unwrap_or_default();
     validate::tags(TOOL, &tags)?;
     let memory_type = args.memory_type.unwrap_or_else(|| "observation".to_string());
-    validate::memory_type(TOOL, &memory_type)?;
+    validators::memory_type(TOOL, &memory_type)?;
     if let Some(ref refs) = args.external_refs {
-        validate::external_refs(TOOL, refs)?;
+        validators::external_refs(TOOL, refs)?;
     }
-    validate::episode_derivations(TOOL, &memory_type, &args.derivations)?;
+    validators::episode_derivations(TOOL, &memory_type, &args.derivations)?;
     validators::validate_decision_metadata(TOOL, &memory_type, &args.metadata)?;
 
     if let Some(existing) =

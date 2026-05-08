@@ -21,6 +21,7 @@ use crate::embedding::Embedder;
 use crate::envelope::{Envelope, estimate_tokens};
 use crate::error::{ChittaError, Result};
 use crate::tools::validate;
+use crate::validators;
 
 const TOOL: &str = "search_memories";
 
@@ -191,7 +192,7 @@ pub async fn handle(
         _ if include_raw => vec![],
         _ => CONSOLIDATED_TYPES.iter().map(|s| s.to_string()).collect(),
     };
-    validate::memory_types(TOOL, &memory_types)?;
+    validators::memory_types(TOOL, &memory_types)?;
     let min_similarity = min_similarity.unwrap_or(0.0);
     validate::min_similarity(TOOL, min_similarity)?;
 
