@@ -5,6 +5,7 @@
 
 pub mod delete;
 pub mod get;
+pub mod get_profile;
 pub mod health;
 pub mod list;
 pub mod search;
@@ -15,6 +16,7 @@ pub mod validate;
 
 pub use delete::{DeleteArgs, DeleteOutput};
 pub use get::{GetArgs, GetOutput};
+pub use get_profile::{GetProfileArgs, GetProfileOutput};
 pub use health::{HealthArgs, HealthOutput};
 pub use list::{ListArgs, ListItem, ListOutput};
 pub use search::{AppliesTo, SearchArgs, SearchHit, SearchOutput};

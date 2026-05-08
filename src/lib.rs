@@ -11,5 +11,6 @@ pub mod error;
 pub mod ingest;
 pub mod mcp;
 pub mod retrieval;
+pub mod scoring;
 pub mod tools;
 pub mod validators;

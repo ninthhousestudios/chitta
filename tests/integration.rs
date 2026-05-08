@@ -29,8 +29,8 @@ use chitta::db;
 use chitta::embedding::Embedder;
 use chitta::error::ChittaError;
 use chitta::tools::{
-    self, AppliesTo, DeleteArgs, GetArgs, ListArgs, SearchArgs, StoreArgs, SupersedeArgs,
-    UpdateArgs,
+    self, AppliesTo, DeleteArgs, GetArgs, GetProfileArgs, ListArgs, SearchArgs, StoreArgs,
+    SupersedeArgs, UpdateArgs,
 };
 use sqlx::PgPool;
 use tokio::sync::OnceCell;
@@ -2743,4 +2743,160 @@ async fn superseded_row_excluded_from_default_search() {
         result_ids.contains(&new.id),
         "replacement memory should appear in search"
     );
+}
+
+// ---- get_profile ----------------------------------------------------
+
+#[tokio::test]
+async fn get_profile_returns_top_30_by_effective_score() {
+    let h = require_harness!("profile");
+
+    // Seed 35 consolidated memories with varied confidence and last_reinforced_at.
+    // Rows with higher confidence AND more recent reinforcement should rank higher.
+    let now = chrono::Utc::now();
+    let mut stored_ids = Vec::new();
+
+    for i in 0..35u32 {
+        let confidence = 0.50 + (i as f32) * 0.01; // 0.50 .. 0.84
+        let reinforced_days_ago = if i % 2 == 0 {
+            // Even rows: reinforced recently → higher effective_score
+            Some(chrono::Duration::days(i as i64))
+        } else {
+            // Odd rows: reinforced long ago → lower effective_score
+            Some(chrono::Duration::days(300 + i as i64))
+        };
+
+        let last_reinforced = reinforced_days_ago.map(|d| now - d);
+
+        let memory_type = match i % 5 {
+            0 => "trait",
+            1 => "value",
+            2 => "preference",
+            3 => "pattern",
+            _ => "mental_model",
+        };
+
+        let out = tools::store::handle(
+            &h.pool,
+            h.embedder.clone(),
+            StoreArgs {
+                profile: h.profile.clone(),
+                content: format!("profile entry {i}: confidence={confidence:.2}"),
+                idempotency_key: format!("profile-{i}"),
+                event_time: None,
+                tags: None,
+                metadata: None,
+                memory_type: Some(memory_type.into()),
+                external_refs: None,
+                applies_to_domains: None,
+                applies_to_skills: None,
+                applies_to_projects: None,
+                applies_to_situations: None,
+                confidence: Some(confidence),
+                source: None,
+                derivations: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Set last_reinforced_at directly via SQL (store_memory doesn't expose it)
+        if let Some(lr) = last_reinforced {
+            sqlx::query("UPDATE memories SET last_reinforced_at = $1 WHERE id = $2")
+                .bind(lr)
+                .bind(out.id)
+                .execute(&h.pool)
+                .await
+                .unwrap();
+        }
+
+        stored_ids.push(out.id);
+    }
+
+    // Also seed a raw observation — should NOT appear in profile
+    tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "raw observation, not consolidated".into(),
+            idempotency_key: "profile-raw".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("observation".into()),
+            external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: Some(0.99),
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let result = tools::get_profile::handle(
+        &h.pool,
+        GetProfileArgs {
+            profile: h.profile.clone(),
+        },
+    )
+    .await
+    .unwrap();
+
+    // AC: returns up to 30 rows
+    assert_eq!(result.entries.len(), 30, "should return exactly 30 entries");
+    assert_eq!(result.total_candidates, 35, "over-fetch should see all 35");
+    assert!(result.truncated, "should be truncated");
+
+    // AC: ordered by descending effective_score
+    for w in result.entries.windows(2) {
+        assert!(
+            w[0].effective_score >= w[1].effective_score,
+            "entries should be sorted by effective_score DESC: {} >= {} failed",
+            w[0].effective_score,
+            w[1].effective_score,
+        );
+    }
+
+    // AC: no observation types in the result
+    for entry in &result.entries {
+        assert_ne!(
+            entry.memory_type, "observation",
+            "raw observations should not appear in profile"
+        );
+        assert_ne!(entry.memory_type, "episode");
+        assert_ne!(entry.memory_type, "decision");
+    }
+
+    // Verify effective_score < confidence (decay should reduce it unless day-0)
+    for entry in &result.entries {
+        assert!(
+            entry.effective_score <= entry.confidence + 1e-6,
+            "effective_score {} should be <= confidence {}",
+            entry.effective_score,
+            entry.confidence,
+        );
+    }
+}
+
+#[tokio::test]
+async fn get_profile_empty_profile_returns_empty() {
+    let h = require_harness!("profile_empty");
+
+    let result = tools::get_profile::handle(
+        &h.pool,
+        GetProfileArgs {
+            profile: h.profile.clone(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.entries.len(), 0);
+    assert_eq!(result.total_candidates, 0);
+    assert!(!result.truncated);
 }

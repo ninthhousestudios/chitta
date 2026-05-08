@@ -168,6 +168,24 @@ impl ChittaServer {
         serde_json::to_string_pretty(&out).map_err(json_to_rmcp)
     }
 
+    /// Load the always-on working-model profile for a subject.
+    #[tool(
+        description = "Load the always-on working-model profile. Returns up to 30 \
+                          consolidated memories (traits, values, preferences, patterns, \
+                          mental models) ordered by effective_score — a decay-weighted \
+                          combination of confidence and recency. Call at session start \
+                          with profile='josh' to ground the conversation."
+    )]
+    pub async fn get_profile(
+        &self,
+        Parameters(args): Parameters<tools::GetProfileArgs>,
+    ) -> Result<String, ErrorData> {
+        let out = tools::get_profile::handle(&self.pool, args)
+            .await
+            .map_err(chitta_to_rmcp)?;
+        serde_json::to_string_pretty(&out).map_err(json_to_rmcp)
+    }
+
     /// Health check — verifies DB connectivity and embedder responsiveness.
     #[tool(
         description = "Health check. Verifies DB connectivity and ONNX embedder \
@@ -191,9 +209,9 @@ impl ServerHandler for ChittaServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "chitta v0.3.0 — working model of Josh. \
-                 Eight tools: store_memory, get_memory, search_memories, \
+                 Nine tools: store_memory, get_memory, search_memories, \
                  update_memory, delete_memory, list_recent_memories, \
-                 supersede_memory, health_check. \
+                 supersede_memory, get_profile, health_check. \
                  Profiles isolate namespaces; idempotency_key dedupes writes; \
                  bi-temporal (event_time + record_time); verbatim storage.",
         )

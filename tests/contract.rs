@@ -8,9 +8,9 @@
 use chitta::envelope::Envelope;
 use chitta::error::{ChittaError, codes};
 use chitta::tools::{
-    AppliesTo, DerivationInput, DeleteArgs, DeleteOutput, GetArgs, GetOutput, ListArgs, ListItem,
-    ListOutput, SearchArgs, SearchHit, SearchOutput, StoreArgs, StoreOutput, SupersedeArgs,
-    SupersedeOutput, UpdateArgs, UpdateOutput,
+    AppliesTo, DerivationInput, DeleteArgs, DeleteOutput, GetArgs, GetOutput, GetProfileArgs,
+    GetProfileOutput, ListArgs, ListItem, ListOutput, SearchArgs, SearchHit, SearchOutput,
+    StoreArgs, StoreOutput, SupersedeArgs, SupersedeOutput, UpdateArgs, UpdateOutput,
 };
 use serde_json::{Value, json};
 
@@ -836,4 +836,31 @@ fn supersede_output_wire_keys() {
     };
     let v = serde_json::to_value(&out).unwrap();
     assert_keys(&v, &["old_id", "new_id", "derivation_id"]);
+}
+
+// ---- get_profile (tier-0) -------------------------------------------
+
+#[test]
+fn get_profile_args_shape() {
+    let v = serde_json::json!({"profile": "josh"});
+    let args: GetProfileArgs = serde_json::from_value(v).unwrap();
+    assert_eq!(args.profile, "josh");
+}
+
+#[test]
+fn get_profile_args_rejects_missing_profile() {
+    let v = serde_json::json!({});
+    assert!(serde_json::from_value::<GetProfileArgs>(v).is_err());
+}
+
+#[test]
+fn get_profile_output_wire_keys() {
+    let out = GetProfileOutput {
+        profile: "josh".into(),
+        entries: vec![],
+        total_candidates: 0,
+        truncated: false,
+    };
+    let v = serde_json::to_value(&out).unwrap();
+    assert_keys(&v, &["profile", "entries", "total_candidates", "truncated"]);
 }

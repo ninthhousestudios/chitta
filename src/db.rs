@@ -820,3 +820,31 @@ pub async fn get_derived_from(pool: &PgPool, source_id: Uuid) -> Result<Vec<Deri
     .await?;
     Ok(rows)
 }
+
+/// Over-fetch the top-100 active consolidated rows for tier-0 profile,
+/// ordered by raw confidence DESC. The caller applies `effective_score`
+/// decay and truncates to the final top-N.
+pub async fn fetch_profile_candidates(pool: &PgPool, profile: &str) -> Result<Vec<MemoryRow>> {
+    let rows = sqlx::query_as::<_, MemoryRow>(
+        r#"
+        SELECT id, profile, content, embedding, sparse_embedding,
+               event_time, record_time, idempotency_key, source,
+               memory_type, tags, external_refs, metadata,
+               applies_to_domains, applies_to_skills,
+               applies_to_projects, applies_to_situations,
+               superseded_by, confidence, reinforcement_count,
+               last_reinforced_at, invalidated_at
+        FROM memories
+        WHERE profile = $1
+          AND memory_type IN ('trait', 'value', 'preference', 'pattern', 'mental_model')
+          AND superseded_by IS NULL
+          AND invalidated_at IS NULL
+        ORDER BY confidence DESC NULLS LAST
+        LIMIT 100
+        "#,
+    )
+    .bind(profile)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
