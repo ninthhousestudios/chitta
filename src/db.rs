@@ -628,6 +628,87 @@ pub async fn insert_query_log(pool: &PgPool, e: &QueryLogInput<'_>) -> Result<()
     Ok(())
 }
 
+/// Insert a memory and its derivations atomically in a single transaction.
+/// On idempotency conflict, returns the existing row (derivations are not re-inserted).
+pub async fn insert_memory_with_derivations(
+    pool: &PgPool,
+    new: &MemoryRow,
+    derivations: &[(Uuid, String)],
+) -> Result<(MemoryRow, bool)> {
+    let mut tx = pool.begin().await?;
+
+    let insert_result = sqlx::query_as::<_, MemoryRow>(
+        r#"
+        INSERT INTO memories
+            (id, profile, content, embedding, sparse_embedding,
+             event_time, record_time, idempotency_key, source, memory_type,
+             tags, external_refs, metadata,
+             applies_to_domains, applies_to_skills, applies_to_projects, applies_to_situations,
+             superseded_by, confidence, reinforcement_count, last_reinforced_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+        RETURNING *
+        "#,
+    )
+    .bind(new.id)
+    .bind(&new.profile)
+    .bind(&new.content)
+    .bind(&new.embedding)
+    .bind(&new.sparse_embedding)
+    .bind(new.event_time)
+    .bind(new.record_time)
+    .bind(&new.idempotency_key)
+    .bind(&new.source)
+    .bind(&new.memory_type)
+    .bind(&new.tags)
+    .bind(&new.external_refs)
+    .bind(&new.metadata)
+    .bind(&new.applies_to_domains)
+    .bind(&new.applies_to_skills)
+    .bind(&new.applies_to_projects)
+    .bind(&new.applies_to_situations)
+    .bind(new.superseded_by)
+    .bind(new.confidence)
+    .bind(new.reinforcement_count)
+    .bind(new.last_reinforced_at)
+    .fetch_one(&mut *tx)
+    .await;
+
+    let stored = match insert_result {
+        Ok(row) => row,
+        Err(e) => {
+            if is_unique_violation(&e) {
+                tx.rollback().await.ok();
+                let existing = find_by_idempotency_key(pool, &new.profile, &new.idempotency_key)
+                    .await?
+                    .ok_or_else(|| {
+                        ChittaError::Internal(
+                            "unique violation without recoverable row".to_string(),
+                        )
+                    })?;
+                return Ok((existing, true));
+            }
+            return Err(e.into());
+        }
+    };
+
+    for (source_id, derivation_type) in derivations {
+        sqlx::query(
+            r#"
+            INSERT INTO derivations (derived_id, source_id, derivation_type)
+            VALUES ($1, $2, $3)
+            "#,
+        )
+        .bind(stored.id)
+        .bind(source_id)
+        .bind(derivation_type)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok((stored, false))
+}
+
 // ── derivations (migration 0009) ────────────────────────────────────
 
 #[derive(Debug, Clone, FromRow)]

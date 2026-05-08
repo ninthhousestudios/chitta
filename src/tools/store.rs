@@ -17,6 +17,7 @@ use crate::db::{self, MemoryRow};
 use crate::embedding::Embedder;
 use crate::error::{ChittaError, Result};
 use crate::tools::validate;
+pub use crate::tools::validate::DerivationInput;
 
 const TOOL: &str = "store_memory";
 
@@ -66,6 +67,10 @@ pub struct StoreArgs {
     /// Which agent/harness wrote this memory (e.g. claude-code, codex, opencode).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Derivations linking this memory to source memories.
+    /// Required for `memory_type=episode` (at least one entry).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derivations: Option<Vec<DerivationInput>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -116,6 +121,7 @@ pub async fn handle(
     if let Some(ref refs) = args.external_refs {
         validate::external_refs(TOOL, refs)?;
     }
+    validate::episode_derivations(TOOL, &memory_type, &args.derivations)?;
 
     if let Some(existing) =
         db::find_by_idempotency_key(pool, &args.profile, &args.idempotency_key).await?
@@ -160,8 +166,24 @@ pub async fn handle(
         invalidated_at: None,
     };
 
-    let (stored, replayed) = db::insert_or_fetch_memory(pool, &row).await?;
-    Ok(row_to_output(stored, replayed))
+    let parsed_derivations: Vec<(Uuid, String)> = args
+        .derivations
+        .unwrap_or_default()
+        .into_iter()
+        .map(|d| {
+            let uuid = Uuid::parse_str(&d.source_id).expect("validated above");
+            (uuid, d.derivation_type)
+        })
+        .collect();
+
+    if parsed_derivations.is_empty() {
+        let (stored, replayed) = db::insert_or_fetch_memory(pool, &row).await?;
+        Ok(row_to_output(stored, replayed))
+    } else {
+        let (stored, replayed) =
+            db::insert_memory_with_derivations(pool, &row, &parsed_derivations).await?;
+        Ok(row_to_output(stored, replayed))
+    }
 }
 
 fn row_to_output(row: MemoryRow, replayed: bool) -> StoreOutput {

@@ -221,6 +221,74 @@ pub fn memory_types(tool: &'static str, values: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Derivation input from the caller (before UUID parsing).
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct DerivationInput {
+    /// UUID of the source memory this derivation links to.
+    pub source_id: String,
+    /// Type of derivation (e.g. "synthesised_from", "supersedes").
+    pub derivation_type: String,
+}
+
+pub fn episode_derivations(
+    tool: &'static str,
+    memory_type: &str,
+    derivations: &Option<Vec<DerivationInput>>,
+) -> Result<()> {
+    if memory_type != "episode" {
+        return Ok(());
+    }
+    match derivations {
+        None => {
+            return Err(ChittaError::InvalidArgument {
+                tool,
+                argument: "derivations".to_string(),
+                constraint: "episode memory requires at least one derivation".to_string(),
+                received: Some(json!(null)),
+                next_action: "episode memory requires at least one entry in derivations \
+                    linking to source observations. Either supply derivations, \
+                    or use memory_type=observation."
+                    .to_string(),
+            });
+        }
+        Some(v) if v.is_empty() => {
+            return Err(ChittaError::InvalidArgument {
+                tool,
+                argument: "derivations".to_string(),
+                constraint: "episode memory requires at least one derivation".to_string(),
+                received: Some(json!([])),
+                next_action: "episode memory requires at least one entry in derivations \
+                    linking to source observations. Either supply derivations, \
+                    or use memory_type=observation."
+                    .to_string(),
+            });
+        }
+        Some(v) => {
+            for (i, d) in v.iter().enumerate() {
+                parse_uuid(tool, "derivations[].source_id", &d.source_id).map_err(|_| {
+                    ChittaError::InvalidArgument {
+                        tool,
+                        argument: "derivations".to_string(),
+                        constraint: "source_id must be a valid UUID".to_string(),
+                        received: Some(json!({"index": i, "source_id": &d.source_id})),
+                        next_action: "Pass a valid UUID for source_id.".to_string(),
+                    }
+                })?;
+                if d.derivation_type.is_empty() {
+                    return Err(ChittaError::InvalidArgument {
+                        tool,
+                        argument: "derivations".to_string(),
+                        constraint: "derivation_type must be non-empty".to_string(),
+                        received: Some(json!({"index": i, "derivation_type": ""})),
+                        next_action: "Pass a non-empty derivation_type (e.g. \"synthesised_from\").".to_string(),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 pub const VALID_REF_KINDS: &[&str] = &["file", "commit", "yojana_task", "memory", "url", "session"];
 
 pub fn ref_filter(tool: &'static str, rf: &super::search::RefFilter) -> Result<()> {
@@ -500,5 +568,64 @@ mod tests {
     #[test]
     fn external_refs_empty_ref() {
         assert!(external_refs("t", &json!([{"kind": "file", "ref": ""}])).is_err());
+    }
+
+    fn deriv(source_id: &str, dtype: &str) -> DerivationInput {
+        DerivationInput {
+            source_id: source_id.to_string(),
+            derivation_type: dtype.to_string(),
+        }
+    }
+
+    #[test]
+    fn episode_derivations_rejects_none() {
+        let r = episode_derivations("t", "episode", &None);
+        assert!(r.is_err());
+        let msg = r.unwrap_err().to_string();
+        assert!(msg.contains("derivations"), "{msg}");
+    }
+
+    #[test]
+    fn episode_derivations_rejects_empty() {
+        let r = episode_derivations("t", "episode", &Some(vec![]));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn episode_derivations_happy_path() {
+        let valid_uuid = "019e0725-aab3-7160-905b-a150603d16d9";
+        let derivs = Some(vec![deriv(valid_uuid, "synthesised_from")]);
+        assert!(episode_derivations("t", "episode", &derivs).is_ok());
+    }
+
+    #[test]
+    fn episode_derivations_multiple() {
+        let u1 = "019e0725-aab3-7160-905b-a150603d16d9";
+        let u2 = "019e0725-aab3-7160-905b-a150603d16da";
+        let derivs = Some(vec![
+            deriv(u1, "synthesised_from"),
+            deriv(u2, "synthesised_from"),
+        ]);
+        assert!(episode_derivations("t", "episode", &derivs).is_ok());
+    }
+
+    #[test]
+    fn episode_derivations_invalid_uuid() {
+        let derivs = Some(vec![deriv("not-a-uuid", "synthesised_from")]);
+        assert!(episode_derivations("t", "episode", &derivs).is_err());
+    }
+
+    #[test]
+    fn episode_derivations_empty_type() {
+        let valid_uuid = "019e0725-aab3-7160-905b-a150603d16d9";
+        let derivs = Some(vec![deriv(valid_uuid, "")]);
+        assert!(episode_derivations("t", "episode", &derivs).is_err());
+    }
+
+    #[test]
+    fn non_episode_ignores_derivations() {
+        assert!(episode_derivations("t", "observation", &None).is_ok());
+        assert!(episode_derivations("t", "observation", &Some(vec![])).is_ok());
+        assert!(episode_derivations("t", "decision", &None).is_ok());
     }
 }

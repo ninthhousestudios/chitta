@@ -8,8 +8,8 @@
 use chitta::envelope::Envelope;
 use chitta::error::{ChittaError, codes};
 use chitta::tools::{
-    DeleteArgs, DeleteOutput, GetArgs, GetOutput, ListArgs, ListItem, ListOutput, SearchArgs,
-    SearchHit, SearchOutput, StoreArgs, StoreOutput, UpdateArgs, UpdateOutput,
+    DerivationInput, DeleteArgs, DeleteOutput, GetArgs, GetOutput, ListArgs, ListItem, ListOutput,
+    SearchArgs, SearchHit, SearchOutput, StoreArgs, StoreOutput, UpdateArgs, UpdateOutput,
 };
 use serde_json::{Value, json};
 
@@ -523,4 +523,124 @@ fn list_output_wire_keys() {
             "memory_type",
         ],
     );
+}
+
+// ---- Episode derivations (wire shape) ---------------------------------
+
+#[test]
+fn store_args_accepts_derivations() {
+    let v = json!({
+        "profile": "josh",
+        "content": "session summary",
+        "idempotency_key": "ep-1",
+        "memory_type": "episode",
+        "derivations": [
+            {"source_id": "019e0725-aab3-7160-905b-a150603d16d9", "derivation_type": "synthesised_from"}
+        ]
+    });
+    let args: StoreArgs = serde_json::from_value(v).unwrap();
+    let derivs = args.derivations.unwrap();
+    assert_eq!(derivs.len(), 1);
+    assert_eq!(derivs[0].source_id, "019e0725-aab3-7160-905b-a150603d16d9");
+    assert_eq!(derivs[0].derivation_type, "synthesised_from");
+}
+
+#[test]
+fn store_args_accepts_multiple_derivations() {
+    let v = json!({
+        "profile": "josh",
+        "content": "session summary",
+        "idempotency_key": "ep-2",
+        "memory_type": "episode",
+        "derivations": [
+            {"source_id": "019e0725-aab3-7160-905b-a150603d16d9", "derivation_type": "synthesised_from"},
+            {"source_id": "019e0725-aab3-7160-905b-a150603d16da", "derivation_type": "synthesised_from"}
+        ]
+    });
+    let args: StoreArgs = serde_json::from_value(v).unwrap();
+    assert_eq!(args.derivations.unwrap().len(), 2);
+}
+
+#[test]
+fn store_args_episode_missing_derivations_is_none() {
+    let v = json!({
+        "profile": "josh",
+        "content": "session summary",
+        "idempotency_key": "ep-3",
+        "memory_type": "episode",
+    });
+    let args: StoreArgs = serde_json::from_value(v).unwrap();
+    assert!(args.derivations.is_none());
+}
+
+#[test]
+fn store_args_episode_empty_derivations() {
+    let v = json!({
+        "profile": "josh",
+        "content": "session summary",
+        "idempotency_key": "ep-4",
+        "memory_type": "episode",
+        "derivations": []
+    });
+    let args: StoreArgs = serde_json::from_value(v).unwrap();
+    assert_eq!(args.derivations.unwrap().len(), 0);
+}
+
+#[test]
+fn store_args_non_episode_with_derivations() {
+    let v = json!({
+        "profile": "josh",
+        "content": "just an observation",
+        "idempotency_key": "obs-1",
+        "memory_type": "observation",
+        "derivations": [
+            {"source_id": "019e0725-aab3-7160-905b-a150603d16d9", "derivation_type": "synthesised_from"}
+        ]
+    });
+    let args: StoreArgs = serde_json::from_value(v).unwrap();
+    assert!(args.derivations.is_some());
+}
+
+#[test]
+fn episode_derivation_validation_rejects_missing() {
+    use chitta::tools::validate;
+    let r = validate::episode_derivations("store_memory", "episode", &None);
+    assert!(r.is_err());
+    let err = r.unwrap_err();
+    match &err {
+        ChittaError::InvalidArgument { next_action, .. } => {
+            assert!(
+                next_action.contains("episode memory requires at least one entry in derivations"),
+                "expected prescribed error text, got: {next_action}"
+            );
+        }
+        other => panic!("expected InvalidArgument, got: {other:?}"),
+    }
+}
+
+#[test]
+fn episode_derivation_validation_rejects_empty() {
+    use chitta::tools::validate;
+    let r = validate::episode_derivations("store_memory", "episode", &Some(vec![]));
+    assert!(r.is_err());
+    let err = r.unwrap_err();
+    match &err {
+        ChittaError::InvalidArgument { next_action, .. } => {
+            assert!(
+                next_action.contains("Either supply derivations, or use memory_type=observation"),
+                "expected prescribed error text, got: {next_action}"
+            );
+        }
+        other => panic!("expected InvalidArgument, got: {other:?}"),
+    }
+}
+
+#[test]
+fn episode_derivation_validation_accepts_valid() {
+    use chitta::tools::validate;
+    let derivs = Some(vec![DerivationInput {
+        source_id: "019e0725-aab3-7160-905b-a150603d16d9".to_string(),
+        derivation_type: "synthesised_from".to_string(),
+    }]);
+    assert!(validate::episode_derivations("store_memory", "episode", &derivs).is_ok());
 }

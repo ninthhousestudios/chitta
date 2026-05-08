@@ -236,6 +236,7 @@ async fn idempotent_replay_returns_same_row() {
         applies_to_situations: None,
         confidence: None,
         source: None,
+        derivations: None,
     };
 
     let first = tools::store::handle(&h.pool, h.embedder.clone(), args())
@@ -292,6 +293,7 @@ async fn verbatim_roundtrip_preserves_unicode_and_whitespace() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -375,6 +377,7 @@ async fn search_max_tokens_triggers_truncated_with_honest_total() {
                 applies_to_situations: None,
                 confidence: None,
         source: None,
+                derivations: None,
             },
         )
         .await
@@ -443,6 +446,7 @@ async fn error_contract_invalid_event_time_populates_next_action() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -505,6 +509,7 @@ async fn search_snippet_is_verbatim_prefix() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -566,6 +571,7 @@ async fn profile_isolation_keeps_searches_scoped() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -622,6 +628,7 @@ async fn content_too_long_rejected_with_token_count() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -658,6 +665,7 @@ async fn concurrent_duplicate_writes_converge_on_one_row() {
         applies_to_situations: None,
         confidence: None,
         source: None,
+        derivations: None,
     };
 
     let (a, b) = tokio::join!(
@@ -708,6 +716,7 @@ async fn search_finds_stored_memory_by_semantic_similarity() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -772,6 +781,7 @@ async fn update_memory_content_reembeds() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -832,6 +842,7 @@ async fn update_memory_tags_only_no_reembed() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -943,6 +954,7 @@ async fn soft_delete_hides_memory() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -1001,6 +1013,7 @@ async fn restore_after_soft_delete_creates_new_row() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -1036,6 +1049,7 @@ async fn restore_after_soft_delete_creates_new_row() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -1092,6 +1106,7 @@ async fn list_recent_returns_time_ordered() {
                 applies_to_situations: None,
                 confidence: None,
         source: None,
+                derivations: None,
             },
         )
         .await
@@ -1147,6 +1162,7 @@ async fn list_recent_respects_limit() {
                 applies_to_situations: None,
                 confidence: None,
         source: None,
+                derivations: None,
             },
         )
         .await
@@ -1196,6 +1212,7 @@ async fn search_with_tag_filter_returns_only_matching() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -1220,6 +1237,7 @@ async fn search_with_tag_filter_returns_only_matching() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -1284,6 +1302,7 @@ async fn search_with_min_similarity_filters_low_scores() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -1343,6 +1362,7 @@ async fn truncated_false_when_all_results_fit() {
                 applies_to_situations: None,
                 confidence: None,
         source: None,
+                derivations: None,
             },
         )
         .await
@@ -1403,6 +1423,7 @@ async fn get_memory_cross_profile_isolation() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -1454,6 +1475,7 @@ async fn store_with_non_default_memory_type_roundtrips() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -1510,6 +1532,7 @@ async fn search_memory_types_filter_excludes_non_matching() {
                 applies_to_situations: None,
                 confidence: None,
         source: None,
+                derivations: None,
             },
         )
         .await
@@ -1570,6 +1593,7 @@ async fn invalid_memory_type_store_rejected() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -1606,6 +1630,7 @@ async fn search_returns_score_and_similarity() {
             applies_to_situations: None,
             confidence: None,
         source: None,
+        derivations: None,
         },
     )
     .await
@@ -1640,5 +1665,240 @@ async fn search_returns_score_and_similarity() {
     assert_eq!(
         hit.similarity, hit.score,
         "with no weights/recency, score == similarity"
+    );
+}
+
+// ---- Episode derivations (wm-3) ----------------------------------------
+
+#[tokio::test]
+async fn episode_with_derivations_writes_atomically() {
+    let h = require_harness!("ep_atom");
+
+    // First store two observations that will be the derivation sources.
+    let obs1 = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh corrected the agent — prefers explicit over implicit.".into(),
+            idempotency_key: "obs-src-1".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("observation".into()),
+            external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let obs2 = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh pushed back on adding abstraction layers too early.".into(),
+            idempotency_key: "obs-src-2".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("observation".into()),
+            external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Now store the episode linking to both observations.
+    let episode = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Session: worked on chitta pivot. Josh values explicit contracts.".into(),
+            idempotency_key: "ep-deriv-1".into(),
+            event_time: None,
+            tags: Some(vec!["session".into()]),
+            metadata: None,
+            memory_type: Some("episode".into()),
+            external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: Some(vec![
+                tools::DerivationInput {
+                    source_id: obs1.id.to_string(),
+                    derivation_type: "synthesised_from".into(),
+                },
+                tools::DerivationInput {
+                    source_id: obs2.id.to_string(),
+                    derivation_type: "synthesised_from".into(),
+                },
+            ]),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(episode.memory_type, "episode");
+
+    // Verify derivation rows exist in the DB.
+    let derivs = db::get_derivations_for(&h.pool, episode.id).await.unwrap();
+    assert_eq!(derivs.len(), 2, "expected 2 derivation rows");
+    let source_ids: Vec<_> = derivs.iter().map(|d| d.source_id).collect();
+    assert!(source_ids.contains(&obs1.id));
+    assert!(source_ids.contains(&obs2.id));
+    for d in &derivs {
+        assert_eq!(d.derived_id, episode.id);
+        assert_eq!(d.derivation_type, "synthesised_from");
+    }
+}
+
+#[tokio::test]
+async fn episode_without_derivations_rejected() {
+    let h = require_harness!("ep_no_deriv");
+
+    let err = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "session summary".into(),
+            idempotency_key: "ep-reject-1".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("episode".into()),
+            external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap_err();
+
+    match &err {
+        ChittaError::InvalidArgument {
+            argument,
+            next_action,
+            ..
+        } => {
+            assert_eq!(argument, "derivations");
+            assert!(
+                next_action.contains("episode memory requires at least one entry in derivations"),
+                "got: {next_action}"
+            );
+        }
+        other => panic!("expected InvalidArgument, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn episode_with_empty_derivations_rejected() {
+    let h = require_harness!("ep_empty_deriv");
+
+    let err = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "session summary".into(),
+            idempotency_key: "ep-reject-2".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("episode".into()),
+            external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: Some(vec![]),
+        },
+    )
+    .await
+    .unwrap_err();
+
+    match &err {
+        ChittaError::InvalidArgument {
+            argument,
+            next_action,
+            ..
+        } => {
+            assert_eq!(argument, "derivations");
+            assert!(
+                next_action.contains("Either supply derivations, or use memory_type=observation"),
+                "got: {next_action}"
+            );
+        }
+        other => panic!("expected InvalidArgument, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn episode_derivation_invalid_source_id_rolls_back() {
+    let h = require_harness!("ep_rollback");
+
+    let bogus_uuid = Uuid::now_v7();
+
+    let err = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "session that should be rolled back".into(),
+            idempotency_key: "ep-rollback-1".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("episode".into()),
+            external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: Some(vec![tools::DerivationInput {
+                source_id: bogus_uuid.to_string(),
+                derivation_type: "synthesised_from".into(),
+            }]),
+        },
+    )
+    .await;
+
+    assert!(err.is_err(), "should fail with FK violation");
+
+    // Verify the episode row was NOT persisted (transaction rolled back).
+    let check = db::find_by_idempotency_key(&h.pool, &h.profile, "ep-rollback-1")
+        .await
+        .unwrap();
+    assert!(
+        check.is_none(),
+        "episode row should be rolled back when derivation FK fails"
     );
 }
