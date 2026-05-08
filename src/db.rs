@@ -84,7 +84,7 @@ pub struct SearchParams<'a> {
     pub recency_weight: f32,
     pub recency_half_life_days: f32,
     pub exclude_invalidated: bool,
-    pub exclude_retired: bool,
+    pub exclude_superseded: bool,
     pub ref_filter_json: Option<&'a serde_json::Value>,
     pub applies_to_domains: &'a [String],
     pub applies_to_skills: &'a [String],
@@ -425,7 +425,7 @@ pub async fn search_by_embedding(
     .bind(p.tags)
     .bind(p.memory_types)
     .bind(p.exclude_invalidated)
-    .bind(p.exclude_retired)
+    .bind(p.exclude_superseded)
     .bind(p.ref_filter_json)
     .bind(p.applies_to_domains)
     .bind(p.applies_to_skills)
@@ -478,7 +478,7 @@ pub async fn search_by_embedding(
     .bind(fetch_limit)
     .bind(p.memory_types)
     .bind(p.exclude_invalidated)
-    .bind(p.exclude_retired)
+    .bind(p.exclude_superseded)
     .bind(p.ref_filter_json)
     .bind(p.applies_to_domains)
     .bind(p.applies_to_skills)

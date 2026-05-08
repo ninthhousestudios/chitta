@@ -91,9 +91,9 @@ pub struct SearchArgs {
     /// Exclude soft-deleted memories. Default true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exclude_invalidated: Option<bool>,
-    /// Exclude retired memories (superseded by a derivation). Default true.
+    /// Exclude superseded memories (superseded by a derivation). Default true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exclude_retired: Option<bool>,
+    pub exclude_superseded: Option<bool>,
     /// Filter by external ref kind and optionally value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ref_filter: Option<RefFilter>,
@@ -156,14 +156,14 @@ pub async fn handle(
         include_content,
         memory_types,
         exclude_invalidated,
-        exclude_retired,
+        exclude_superseded,
         ref_filter,
         applies_to,
         include_raw,
     } = args;
     let include_content = include_content.unwrap_or(false);
     let exclude_invalidated = exclude_invalidated.unwrap_or(true);
-    let exclude_retired = exclude_retired.unwrap_or(true);
+    let exclude_superseded = exclude_superseded.unwrap_or(true);
     let include_raw = include_raw.unwrap_or(false);
     let applies_to = applies_to.unwrap_or_default();
 
@@ -230,12 +230,13 @@ pub async fn handle(
                 k: fetch_k,
                 tags: &tags,
                 memory_types: &memory_types,
+                min_similarity,
                 recency_weight: search_cfg.recency_weight,
                 recency_half_life_days: search_cfg.recency_half_life_days,
                 search_cfg,
                 query_text: &query,
                 exclude_invalidated,
-                exclude_retired,
+                exclude_superseded,
                 ref_filter_json: ref_filter_json.as_ref(),
                 applies_to_domains: &at_domains,
                 applies_to_skills: &at_skills,
@@ -257,7 +258,7 @@ pub async fn handle(
                 recency_weight: search_cfg.recency_weight,
                 recency_half_life_days: search_cfg.recency_half_life_days,
                 exclude_invalidated,
-                exclude_retired,
+                exclude_superseded,
                 ref_filter_json: ref_filter_json.as_ref(),
                 applies_to_domains: &at_domains,
                 applies_to_skills: &at_skills,

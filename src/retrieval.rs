@@ -17,12 +17,13 @@ pub struct HybridSearchParams<'a> {
     pub k: i64,
     pub tags: &'a [String],
     pub memory_types: &'a [String],
+    pub min_similarity: f32,
     pub recency_weight: f32,
     pub recency_half_life_days: f32,
     pub search_cfg: &'a SearchConfig,
     pub query_text: &'a str,
     pub exclude_invalidated: bool,
-    pub exclude_retired: bool,
+    pub exclude_superseded: bool,
     pub ref_filter_json: Option<&'a serde_json::Value>,
     pub applies_to_domains: &'a [String],
     pub applies_to_skills: &'a [String],
@@ -52,7 +53,7 @@ pub async fn search_hybrid(
         recency_weight: 0.0,
         recency_half_life_days: p.recency_half_life_days,
         exclude_invalidated: p.exclude_invalidated,
-        exclude_retired: p.exclude_retired,
+        exclude_superseded: p.exclude_superseded,
         ref_filter_json: p.ref_filter_json,
         applies_to_domains: p.applies_to_domains,
         applies_to_skills: p.applies_to_skills,
@@ -145,6 +146,10 @@ pub async fn search_hybrid(
     }
 
     apply_type_weights(&mut hits, &p.search_cfg.type_weights);
+
+    if p.min_similarity > 0.0 {
+        hits.retain(|h| h.similarity >= p.min_similarity);
+    }
 
     Ok((hits, total))
 }

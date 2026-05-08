@@ -212,7 +212,7 @@ async fn run_replay(profile: Option<String>, limit: i64) -> Result<()> {
                 recency_weight: 0.0,
                 recency_half_life_days: 30.0,
                 exclude_invalidated: true,
-                exclude_retired: false,
+                exclude_superseded: false,
                 ref_filter_json: None,
                 applies_to_domains: &[],
                 applies_to_skills: &[],

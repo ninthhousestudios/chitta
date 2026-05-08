@@ -29,7 +29,7 @@ use chitta::db;
 use chitta::embedding::Embedder;
 use chitta::error::ChittaError;
 use chitta::tools::{
-    self, AppliesTo, DeleteArgs, GetArgs, GetProfileArgs, ListArgs, ReflectSummaryArgs, SearchArgs,
+    self, AppliesTo, DeleteArgs, GetArgs, GetProfileArgs, ListArgs, ReflectStatusArgs, SearchArgs,
     StoreArgs, SupersedeArgs, UpdateArgs,
 };
 use sqlx::PgPool;
@@ -337,7 +337,7 @@ async fn search_envelope_has_four_fields_on_empty_profile() {
             include_content: None,
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: None,
@@ -405,7 +405,7 @@ async fn search_max_tokens_triggers_truncated_with_honest_total() {
             include_content: None,
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: None,
@@ -537,7 +537,7 @@ async fn search_snippet_is_verbatim_prefix() {
             include_content: None,
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: None,
@@ -601,7 +601,7 @@ async fn profile_isolation_keeps_searches_scoped() {
             include_content: None,
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: None,
@@ -748,7 +748,7 @@ async fn search_finds_stored_memory_by_semantic_similarity() {
             include_content: None,
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: None,
@@ -1271,7 +1271,7 @@ async fn search_with_tag_filter_returns_only_matching() {
             include_content: None,
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: None,
@@ -1338,7 +1338,7 @@ async fn search_with_min_similarity_filters_low_scores() {
             include_content: None,
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: None,
@@ -1401,7 +1401,7 @@ async fn truncated_false_when_all_results_fit() {
             include_content: None,
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: None,
@@ -1573,7 +1573,7 @@ async fn search_memory_types_filter_excludes_non_matching() {
             include_content: None,
             memory_types: Some(vec!["decision".into()]),
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: None,
@@ -1672,7 +1672,7 @@ async fn search_returns_score_and_similarity() {
             include_content: None,
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: None,
@@ -1978,7 +1978,7 @@ async fn search_default_excludes_raw_types() {
             include_content: None,
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: None,
@@ -2045,7 +2045,7 @@ async fn search_include_raw_returns_all_types() {
             include_content: None,
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: Some(true),
@@ -2130,7 +2130,7 @@ async fn search_applies_to_single_facet() {
             include_content: Some(true),
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: Some(AppliesTo {
                 domains: Some(vec!["rust".into()]),
@@ -2224,7 +2224,7 @@ async fn search_applies_to_multi_facet_intersection() {
             include_content: Some(true),
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: Some(AppliesTo {
                 domains: Some(vec!["rust".into()]),
@@ -2325,7 +2325,7 @@ async fn search_excludes_superseded_by_default() {
             include_content: Some(true),
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: None,
@@ -2400,7 +2400,7 @@ async fn search_excludes_invalidated_by_default() {
             include_content: None,
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
             include_raw: None,
@@ -2725,7 +2725,7 @@ async fn superseded_row_excluded_from_default_search() {
             include_content: None,
             memory_types: None,
             exclude_invalidated: None,
-            exclude_retired: None,
+            exclude_superseded: None,
             ref_filter: None,
             include_raw: None,
             applies_to: None,
@@ -2901,10 +2901,10 @@ async fn get_profile_empty_profile_returns_empty() {
     assert!(!result.truncated);
 }
 
-// ---- reflect_summary ------------------------------------------------
+// ---- reflect_status ------------------------------------------------
 
 #[tokio::test]
-async fn reflect_summary_counts_raw_rows_since_last_run() {
+async fn reflect_status_counts_raw_rows_since_last_run() {
     let h = require_harness!("reflect");
 
     // Seed 3 observations
@@ -2985,9 +2985,9 @@ async fn reflect_summary_counts_raw_rows_since_last_run() {
     .unwrap();
 
     // First reflect run
-    let r1 = tools::reflect_summary::handle(
+    let r1 = tools::reflect_status::handle(
         &h.pool,
-        ReflectSummaryArgs {
+        ReflectStatusArgs {
             profile: h.profile.clone(),
         },
     )
@@ -3028,9 +3028,9 @@ async fn reflect_summary_counts_raw_rows_since_last_run() {
     .unwrap();
 
     // Second reflect run — should only see the new row
-    let r2 = tools::reflect_summary::handle(
+    let r2 = tools::reflect_status::handle(
         &h.pool,
-        ReflectSummaryArgs {
+        ReflectStatusArgs {
             profile: h.profile.clone(),
         },
     )
@@ -3044,12 +3044,12 @@ async fn reflect_summary_counts_raw_rows_since_last_run() {
 }
 
 #[tokio::test]
-async fn reflect_summary_empty_profile() {
+async fn reflect_status_empty_profile() {
     let h = require_harness!("reflect_empty");
 
-    let result = tools::reflect_summary::handle(
+    let result = tools::reflect_status::handle(
         &h.pool,
-        ReflectSummaryArgs {
+        ReflectStatusArgs {
             profile: h.profile.clone(),
         },
     )

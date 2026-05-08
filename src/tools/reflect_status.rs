@@ -10,16 +10,16 @@ use crate::db;
 use crate::error::Result;
 use crate::tools::validate;
 
-const TOOL: &str = "reflect_summary";
+const TOOL: &str = "reflect_status";
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ReflectSummaryArgs {
+pub struct ReflectStatusArgs {
     /// Profile to reflect on.
     pub profile: String,
 }
 
 #[derive(Debug, Serialize)]
-pub struct ReflectSummaryOutput {
+pub struct ReflectStatusOutput {
     pub profile: String,
     pub since: Option<DateTime<Utc>>,
     pub last_run_id: Option<Uuid>,
@@ -29,6 +29,7 @@ pub struct ReflectSummaryOutput {
     pub distinct_domains: Vec<String>,
     pub distinct_skills: Vec<String>,
     pub distinct_projects: Vec<String>,
+    pub distinct_situations: Vec<String>,
     pub disagree_flagged: Vec<DisagreeFlagged>,
     pub run_id: Uuid,
 }
@@ -47,11 +48,11 @@ pub struct DisagreeFlagged {
 }
 
 #[tracing::instrument(
-    name = "tool.reflect_summary",
+    name = "tool.reflect_status",
     skip(pool, args),
     fields(profile = %args.profile),
 )]
-pub async fn handle(pool: &PgPool, args: ReflectSummaryArgs) -> Result<ReflectSummaryOutput> {
+pub async fn handle(pool: &PgPool, args: ReflectStatusArgs) -> Result<ReflectStatusOutput> {
     validate::profile(TOOL, &args.profile)?;
 
     let last_run = db::last_reflect_run(pool, &args.profile).await?;
@@ -64,6 +65,7 @@ pub async fn handle(pool: &PgPool, args: ReflectSummaryArgs) -> Result<ReflectSu
     let mut domains: BTreeSet<String> = BTreeSet::new();
     let mut skills: BTreeSet<String> = BTreeSet::new();
     let mut projects: BTreeSet<String> = BTreeSet::new();
+    let mut situations: BTreeSet<String> = BTreeSet::new();
     let mut disagree_flagged: Vec<DisagreeFlagged> = Vec::new();
     let mut earliest: Option<DateTime<Utc>> = None;
     let mut latest: Option<DateTime<Utc>> = None;
@@ -79,6 +81,9 @@ pub async fn handle(pool: &PgPool, args: ReflectSummaryArgs) -> Result<ReflectSu
         }
         for p in &row.applies_to_projects {
             projects.insert(p.clone());
+        }
+        for s in &row.applies_to_situations {
+            situations.insert(s.clone());
         }
 
         match earliest {
@@ -124,7 +129,7 @@ pub async fn handle(pool: &PgPool, args: ReflectSummaryArgs) -> Result<ReflectSu
     )
     .await?;
 
-    Ok(ReflectSummaryOutput {
+    Ok(ReflectStatusOutput {
         profile: args.profile,
         since,
         last_run_id,
@@ -134,6 +139,7 @@ pub async fn handle(pool: &PgPool, args: ReflectSummaryArgs) -> Result<ReflectSu
         distinct_domains: domains.into_iter().collect(),
         distinct_skills: skills.into_iter().collect(),
         distinct_projects: projects.into_iter().collect(),
+        distinct_situations: situations.into_iter().collect(),
         disagree_flagged,
         run_id: run.id,
     })

@@ -9,7 +9,7 @@ use chitta::envelope::Envelope;
 use chitta::error::{ChittaError, codes};
 use chitta::tools::{
     AppliesTo, DerivationInput, DeleteArgs, DeleteOutput, GetArgs, GetOutput, GetProfileArgs,
-    GetProfileOutput, ListArgs, ListItem, ListOutput, ReflectSummaryArgs, SearchArgs, SearchHit,
+    GetProfileOutput, ListArgs, ListItem, ListOutput, ReflectStatusArgs, SearchArgs, SearchHit,
     SearchOutput, StoreArgs, StoreOutput, SupersedeArgs, SupersedeOutput, UpdateArgs, UpdateOutput,
 };
 use serde_json::{Value, json};
@@ -865,17 +865,56 @@ fn get_profile_output_wire_keys() {
     assert_keys(&v, &["profile", "entries", "total_candidates", "truncated"]);
 }
 
-// ---- reflect_summary ------------------------------------------------
+// ---- reflect_status -------------------------------------------------
 
 #[test]
-fn reflect_summary_args_shape() {
+fn reflect_status_args_shape() {
     let v = serde_json::json!({"profile": "josh"});
-    let args: ReflectSummaryArgs = serde_json::from_value(v).unwrap();
+    let args: ReflectStatusArgs = serde_json::from_value(v).unwrap();
     assert_eq!(args.profile, "josh");
 }
 
 #[test]
-fn reflect_summary_args_rejects_missing_profile() {
+fn reflect_status_args_rejects_missing_profile() {
     let v = serde_json::json!({});
-    assert!(serde_json::from_value::<ReflectSummaryArgs>(v).is_err());
+    assert!(serde_json::from_value::<ReflectStatusArgs>(v).is_err());
+}
+
+// ---- min_similarity wire contract -----------------------------------
+
+#[test]
+fn search_args_accepts_min_similarity() {
+    let v = json!({"profile": "josh", "query": "q", "min_similarity": 0.42});
+    let args: SearchArgs = serde_json::from_value(v).unwrap();
+    assert!((args.min_similarity.unwrap() - 0.42).abs() < 1e-6);
+}
+
+#[test]
+fn search_args_min_similarity_defaults_to_none() {
+    let v = json!({"profile": "josh", "query": "q"});
+    let args: SearchArgs = serde_json::from_value(v).unwrap();
+    assert!(args.min_similarity.is_none());
+}
+
+// ---- exclude_superseded wire rename ---------------------------------
+
+#[test]
+fn search_args_accepts_exclude_superseded() {
+    let v = json!({"profile": "josh", "query": "q", "exclude_superseded": false});
+    let args: SearchArgs = serde_json::from_value(v).unwrap();
+    assert_eq!(args.exclude_superseded, Some(false));
+}
+
+#[test]
+fn search_args_exclude_superseded_defaults_to_none() {
+    let v = json!({"profile": "josh", "query": "q"});
+    let args: SearchArgs = serde_json::from_value(v).unwrap();
+    assert!(args.exclude_superseded.is_none());
+}
+
+#[test]
+fn search_args_rejects_old_exclude_retired_field() {
+    let v = json!({"profile": "josh", "query": "q", "exclude_retired": false});
+    let args: SearchArgs = serde_json::from_value(v).unwrap();
+    assert!(args.exclude_superseded.is_none());
 }

@@ -74,6 +74,18 @@ pub async fn handle(pool: &PgPool, args: SupersedeArgs) -> Result<SupersedeOutpu
                 ),
             })?;
 
+    if old_row.invalidated_at.is_some() {
+        return Err(ChittaError::InvalidArgument {
+            tool: TOOL,
+            argument: "old_id".into(),
+            constraint: "must not be invalidated (soft-deleted)".into(),
+            received: Some(serde_json::json!(args.old_id)),
+            next_action: format!(
+                "Memory {old_id} has been invalidated. Cannot supersede a deleted memory.",
+            ),
+        });
+    }
+
     if old_row.superseded_by.is_some() {
         return Err(ChittaError::InvalidArgument {
             tool: TOOL,
