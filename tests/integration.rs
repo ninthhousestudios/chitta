@@ -29,8 +29,8 @@ use chitta::db;
 use chitta::embedding::Embedder;
 use chitta::error::ChittaError;
 use chitta::tools::{
-    self, AppliesTo, DeleteArgs, GetArgs, GetProfileArgs, ListArgs, SearchArgs, StoreArgs,
-    SupersedeArgs, UpdateArgs,
+    self, AppliesTo, DeleteArgs, GetArgs, GetProfileArgs, ListArgs, ReflectSummaryArgs, SearchArgs,
+    StoreArgs, SupersedeArgs, UpdateArgs,
 };
 use sqlx::PgPool;
 use tokio::sync::OnceCell;
@@ -2899,4 +2899,165 @@ async fn get_profile_empty_profile_returns_empty() {
     assert_eq!(result.entries.len(), 0);
     assert_eq!(result.total_candidates, 0);
     assert!(!result.truncated);
+}
+
+// ---- reflect_summary ------------------------------------------------
+
+#[tokio::test]
+async fn reflect_summary_counts_raw_rows_since_last_run() {
+    let h = require_harness!("reflect");
+
+    // Seed 3 observations
+    for i in 0..3u32 {
+        tools::store::handle(
+            &h.pool,
+            h.embedder.clone(),
+            StoreArgs {
+                profile: h.profile.clone(),
+                content: format!("observation {i}"),
+                idempotency_key: format!("reflect-obs-{i}"),
+                event_time: None,
+                tags: None,
+                metadata: None,
+                memory_type: Some("observation".into()),
+                external_refs: None,
+                applies_to_domains: Some(vec!["rust".into()]),
+                applies_to_skills: None,
+                applies_to_projects: Some(vec!["chitta".into()]),
+                applies_to_situations: None,
+                confidence: None,
+                source: None,
+                derivations: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    // Seed 1 disagree-flagged observation
+    tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh disagreed with: some trait".into(),
+            idempotency_key: "reflect-disagree".into(),
+            event_time: None,
+            tags: Some(vec!["feedback".into(), "disagree".into()]),
+            metadata: None,
+            memory_type: Some("observation".into()),
+            external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Seed a consolidated row (should NOT appear in reflect)
+    tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "consolidated trait".into(),
+            idempotency_key: "reflect-trait".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("trait".into()),
+            external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: Some(0.80),
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // First reflect run
+    let r1 = tools::reflect_summary::handle(
+        &h.pool,
+        ReflectSummaryArgs {
+            profile: h.profile.clone(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(r1.total, 4, "should see 3 observations + 1 disagree-flagged");
+    assert_eq!(r1.counts.get("observation"), Some(&4));
+    assert!(r1.since.is_none(), "first run should have no prior run");
+    assert_eq!(r1.disagree_flagged.len(), 1);
+    assert!(r1.distinct_domains.contains(&"rust".to_string()));
+    assert!(r1.distinct_projects.contains(&"chitta".to_string()));
+    assert!(r1.date_range.is_some());
+
+    // Seed one more observation after the run
+    tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "new observation after reflect".into(),
+            idempotency_key: "reflect-new".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("observation".into()),
+            external_refs: None,
+            applies_to_domains: None,
+            applies_to_skills: None,
+            applies_to_projects: None,
+            applies_to_situations: None,
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Second reflect run — should only see the new row
+    let r2 = tools::reflect_summary::handle(
+        &h.pool,
+        ReflectSummaryArgs {
+            profile: h.profile.clone(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(r2.total, 1, "second run should only see rows since first run");
+    assert!(r2.since.is_some(), "should reference the first run's timestamp");
+    assert_eq!(r2.last_run_id, Some(r1.run_id));
+    assert_eq!(r2.disagree_flagged.len(), 0);
+}
+
+#[tokio::test]
+async fn reflect_summary_empty_profile() {
+    let h = require_harness!("reflect_empty");
+
+    let result = tools::reflect_summary::handle(
+        &h.pool,
+        ReflectSummaryArgs {
+            profile: h.profile.clone(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.total, 0);
+    assert!(result.since.is_none());
+    assert!(result.date_range.is_none());
+    assert!(result.disagree_flagged.is_empty());
 }

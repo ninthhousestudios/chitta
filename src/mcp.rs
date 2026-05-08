@@ -186,6 +186,24 @@ impl ChittaServer {
         serde_json::to_string_pretty(&out).map_err(json_to_rmcp)
     }
 
+    /// Reflect summary: scan raw rows since last /reflect run and return a summary.
+    #[tool(
+        description = "Reflect summary. Reads raw rows (observation, episode, decision) \
+                          since the last /reflect run and returns counts by type, date range, \
+                          distinct facet values, and disagree-flagged memory IDs. Writes a \
+                          run-marker so the next invocation only reads newer rows. Does NOT \
+                          write consolidated rows — that is the full /reflect pipeline."
+    )]
+    pub async fn reflect_summary(
+        &self,
+        Parameters(args): Parameters<tools::ReflectSummaryArgs>,
+    ) -> Result<String, ErrorData> {
+        let out = tools::reflect_summary::handle(&self.pool, args)
+            .await
+            .map_err(chitta_to_rmcp)?;
+        serde_json::to_string_pretty(&out).map_err(json_to_rmcp)
+    }
+
     /// Health check — verifies DB connectivity and embedder responsiveness.
     #[tool(
         description = "Health check. Verifies DB connectivity and ONNX embedder \
@@ -209,9 +227,9 @@ impl ServerHandler for ChittaServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "chitta v0.3.0 — working model of Josh. \
-                 Nine tools: store_memory, get_memory, search_memories, \
+                 Ten tools: store_memory, get_memory, search_memories, \
                  update_memory, delete_memory, list_recent_memories, \
-                 supersede_memory, get_profile, health_check. \
+                 supersede_memory, get_profile, reflect_summary, health_check. \
                  Profiles isolate namespaces; idempotency_key dedupes writes; \
                  bi-temporal (event_time + record_time); verbatim storage.",
         )

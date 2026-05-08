@@ -821,6 +821,91 @@ pub async fn get_derived_from(pool: &PgPool, source_id: Uuid) -> Result<Vec<Deri
     Ok(rows)
 }
 
+// ── reflect_runs ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, FromRow)]
+pub struct ReflectRunRow {
+    pub id: Uuid,
+    pub profile: String,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub rows_scanned: i32,
+    pub summary: Option<serde_json::Value>,
+}
+
+pub async fn last_reflect_run(pool: &PgPool, profile: &str) -> Result<Option<ReflectRunRow>> {
+    let row = sqlx::query_as::<_, ReflectRunRow>(
+        r#"
+        SELECT id, profile, started_at, completed_at, rows_scanned, summary
+        FROM reflect_runs
+        WHERE profile = $1 AND completed_at IS NOT NULL
+        ORDER BY completed_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(profile)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+pub async fn insert_reflect_run(
+    pool: &PgPool,
+    profile: &str,
+    rows_scanned: i32,
+    summary: Option<serde_json::Value>,
+) -> Result<ReflectRunRow> {
+    let now = Utc::now();
+    let row = sqlx::query_as::<_, ReflectRunRow>(
+        r#"
+        INSERT INTO reflect_runs (profile, started_at, completed_at, rows_scanned, summary)
+        VALUES ($1, $2, $2, $3, $4)
+        RETURNING id, profile, started_at, completed_at, rows_scanned, summary
+        "#,
+    )
+    .bind(profile)
+    .bind(now)
+    .bind(rows_scanned)
+    .bind(summary)
+    .fetch_one(pool)
+    .await?;
+    Ok(row)
+}
+
+/// Fetch raw rows (observation, episode, decision) since a given timestamp.
+/// When `since` is None, returns all raw rows.
+pub async fn fetch_raw_since(
+    pool: &PgPool,
+    profile: &str,
+    since: Option<DateTime<Utc>>,
+) -> Result<Vec<MemoryRow>> {
+    let since = since.unwrap_or_else(|| DateTime::UNIX_EPOCH);
+    let rows = sqlx::query_as::<_, MemoryRow>(
+        r#"
+        SELECT id, profile, content, embedding, sparse_embedding,
+               event_time, record_time, idempotency_key, source,
+               memory_type, tags, external_refs, metadata,
+               applies_to_domains, applies_to_skills,
+               applies_to_projects, applies_to_situations,
+               superseded_by, confidence, reinforcement_count,
+               last_reinforced_at, invalidated_at
+        FROM memories
+        WHERE profile = $1
+          AND memory_type IN ('observation', 'episode', 'decision')
+          AND invalidated_at IS NULL
+          AND record_time > $2
+        ORDER BY record_time ASC
+        "#,
+    )
+    .bind(profile)
+    .bind(since)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+// ── profile candidates ─────────────────────────────────────────────
+
 /// Over-fetch the top-100 active consolidated rows for tier-0 profile,
 /// ordered by raw confidence DESC. The caller applies `effective_score`
 /// decay and truncates to the final top-N.
