@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::consolidated;
 use crate::db;
 use crate::error::{ChittaError, Result};
 use crate::tools::validate;
@@ -72,6 +73,16 @@ pub async fn handle(pool: &PgPool, args: SupersedeArgs) -> Result<SupersedeOutpu
                 args.profile
             ),
         })?;
+
+    if !consolidated::is_consolidated(&old_row.memory_type) {
+        return Err(ChittaError::InvalidArgument {
+            tool: TOOL,
+            argument: "old_id".into(),
+            constraint: "must be a consolidated type (trait, value, pattern, preference, mental_model)".into(),
+            received: Some(serde_json::json!(old_row.memory_type)),
+            next_action: "Only consolidated memories can be superseded. Use delete_memory for observations, decisions, or episodes.".into(),
+        });
+    }
 
     if old_row.invalidated_at.is_some() {
         return Err(ChittaError::InvalidArgument {

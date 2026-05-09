@@ -16,6 +16,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::config::SearchConfig;
+use crate::consolidated::CONSOLIDATED_TYPES;
 use crate::db;
 use crate::embedding::Embedder;
 use crate::envelope::{Envelope, estimate_tokens};
@@ -60,8 +61,6 @@ pub struct AppliesTo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub situations: Option<Vec<String>>,
 }
-
-const CONSOLIDATED_TYPES: &[&str] = &["trait", "value", "pattern", "preference", "mental_model"];
 
 /// Arguments for `search_memories`. `JsonSchema` is derived so rmcp exposes
 /// the same shape callers use on the wire.

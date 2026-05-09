@@ -4,6 +4,7 @@
 //! See `docs/plans/working-model-prd.md` for the v0 design.
 
 pub mod config;
+pub mod consolidated;
 pub mod db;
 pub mod embedding;
 pub mod envelope;
@@ -12,6 +13,5 @@ pub mod facets;
 pub mod ingest;
 pub mod mcp;
 pub mod retrieval;
-pub mod scoring;
 pub mod tools;
 pub mod validators;
