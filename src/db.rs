@@ -59,6 +59,7 @@ pub struct SearchHit {
     pub memory_type: String,
     pub external_refs: Option<serde_json::Value>,
     pub confidence: Option<f32>,
+    pub last_reinforced_at: Option<DateTime<Utc>>,
 }
 
 pub struct MemoryPatch<'a> {
@@ -437,7 +438,7 @@ pub async fn search_by_embedding(
     let search_sql = format!(
         "SELECT id, content, event_time, record_time, tags, \
          (1.0 - (embedding <=> $2))::real AS similarity, \
-         source, metadata, memory_type, external_refs, confidence \
+         source, metadata, memory_type, external_refs, confidence, last_reinforced_at \
          FROM memories \
          WHERE profile = $1 \
          AND (NOT $7 OR invalidated_at IS NULL) \
@@ -536,7 +537,7 @@ pub async fn fetch_search_hits_by_ids(
     let rows = sqlx::query_as::<_, SearchHit>(
         r#"
         SELECT id, content, event_time, record_time, tags,
-               1.0::real AS similarity, source, metadata, memory_type, external_refs, confidence
+               1.0::real AS similarity, source, metadata, memory_type, external_refs, confidence, last_reinforced_at
         FROM memories
         WHERE profile = $1
           AND invalidated_at IS NULL

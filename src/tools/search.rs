@@ -16,7 +16,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::config::SearchConfig;
-use crate::consolidated::CONSOLIDATED_TYPES;
+use crate::consolidated::{self, CONSOLIDATED_TYPES};
 use crate::db;
 use crate::embedding::Embedder;
 use crate::envelope::{Envelope, estimate_tokens};
@@ -128,6 +128,7 @@ pub struct SearchHit {
     pub external_refs: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
+    pub layer: String,
 }
 
 pub type SearchOutput = Envelope<SearchHit>;
@@ -272,26 +273,58 @@ pub async fn handle(
         crate::retrieval::apply_type_weights(&mut hits, &search_cfg.type_weights);
     }
 
-    let candidates: Vec<SearchHit> = hits
+    let now = Utc::now();
+    let (mut consolidated_hits, mut raw_hits): (Vec<_>, Vec<_>) = hits
         .into_iter()
-        .map(|hit| SearchHit {
-            id: hit.id,
-            snippet: prefix_chars(&hit.content, SNIPPET_CHARS),
-            similarity: hit.similarity,
-            score: hit.score,
-            event_time: hit.event_time,
-            record_time: hit.record_time,
-            tags: hit.tags,
-            content: if include_content {
-                Some(hit.content)
+        .partition(|h| consolidated::is_consolidated(&h.memory_type));
+
+    consolidated_hits.sort_by(|a, b| {
+        let a_es = consolidated::effective_score(
+            a.confidence.unwrap_or(0.0),
+            a.last_reinforced_at,
+            a.record_time,
+            now,
+        );
+        let b_es = consolidated::effective_score(
+            b.confidence.unwrap_or(0.0),
+            b.last_reinforced_at,
+            b.record_time,
+            now,
+        );
+        b_es.partial_cmp(&a_es).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut ordered = consolidated_hits;
+    ordered.append(&mut raw_hits);
+
+    let candidates: Vec<SearchHit> = ordered
+        .into_iter()
+        .map(|hit| {
+            let layer = if consolidated::is_consolidated(&hit.memory_type) {
+                "consolidated"
             } else {
-                None
-            },
-            metadata: if include_content { hit.metadata } else { None },
-            memory_type: hit.memory_type,
-            source: hit.source,
-            external_refs: hit.external_refs,
-            confidence: hit.confidence,
+                "raw"
+            };
+            SearchHit {
+                id: hit.id,
+                snippet: prefix_chars(&hit.content, SNIPPET_CHARS),
+                similarity: hit.similarity,
+                score: hit.score,
+                event_time: hit.event_time,
+                record_time: hit.record_time,
+                tags: hit.tags,
+                content: if include_content {
+                    Some(hit.content)
+                } else {
+                    None
+                },
+                metadata: if include_content { hit.metadata } else { None },
+                memory_type: hit.memory_type,
+                source: hit.source,
+                external_refs: hit.external_refs,
+                confidence: hit.confidence,
+                layer: layer.to_string(),
+            }
         })
         .collect();
 
@@ -466,6 +499,7 @@ mod tests {
             source: None,
             external_refs: None,
             confidence: None,
+            layer: "raw".to_string(),
         }
     }
 

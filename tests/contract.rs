@@ -165,6 +165,7 @@ fn search_output_envelope_shape() {
         source: None,
         external_refs: None,
         confidence: None,
+        layer: "raw".into(),
     };
     let env: SearchOutput = Envelope::new(vec![hit], false, Some(1), 42);
     let v = serde_json::to_value(&env).unwrap();
@@ -189,6 +190,7 @@ fn search_output_envelope_shape() {
             "record_time",
             "tags",
             "memory_type",
+            "layer",
         ],
     );
 }

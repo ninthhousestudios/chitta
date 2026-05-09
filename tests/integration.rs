@@ -2369,6 +2369,212 @@ async fn applies_to_uses_gin_index() {
     }
 }
 
+// ---- layer-aware search ranking (chitta/39) -------------------------
+
+#[tokio::test]
+async fn search_consolidated_high_confidence_outranks_low() {
+    let h = require_harness!("layer_rank");
+
+    // Store two consolidated memories with different confidence.
+    // Same semantic content so similarity is comparable.
+    tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh values clear, readable code in every project.".into(),
+            idempotency_key: "lr-high".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("preference".into()),
+            external_refs: None,
+            facets: Facets::default(),
+            confidence: Some(0.95),
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh appreciates clear and readable code style.".into(),
+            idempotency_key: "lr-low".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("preference".into()),
+            external_refs: None,
+            facets: Facets::default(),
+            confidence: Some(0.30),
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let out = tools::search::handle(
+        &h.pool,
+        h.embedder.clone(),
+        false,
+        &test_search_cfg(),
+        SearchArgs {
+            profile: h.profile.clone(),
+            query: "readable code style".into(),
+            k: Some(10),
+            max_tokens: None,
+            tags: None,
+            min_similarity: None,
+            include_content: Some(true),
+            memory_types: None,
+            exclude_invalidated: None,
+            exclude_superseded: None,
+            ref_filter: None,
+            applies_to: None,
+            include_raw: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(out.results.len() >= 2, "should find both memories");
+    for hit in &out.results {
+        assert_eq!(
+            hit.layer, "consolidated",
+            "preference is a consolidated type"
+        );
+    }
+    assert!(
+        out.results[0].confidence.unwrap() > out.results[1].confidence.unwrap(),
+        "high-confidence hit ({}) should outrank low-confidence hit ({})",
+        out.results[0].confidence.unwrap(),
+        out.results[1].confidence.unwrap(),
+    );
+}
+
+#[tokio::test]
+async fn search_raw_hits_ordered_by_recency_when_include_raw() {
+    let h = require_harness!("layer_raw_order");
+
+    // Store a consolidated hit and two raw observations at different event_times.
+    tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh likes writing tests before code.".into(),
+            idempotency_key: "lro-cons".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("pattern".into()),
+            external_refs: None,
+            facets: Facets::default(),
+            confidence: Some(0.80),
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Older observation.
+    tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh said he likes writing tests first today.".into(),
+            idempotency_key: "lro-old".into(),
+            event_time: Some("2025-01-01T00:00:00Z".parse().unwrap()),
+            tags: None,
+            metadata: None,
+            memory_type: Some("observation".into()),
+            external_refs: None,
+            facets: Facets::default(),
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Newer observation.
+    tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh mentioned he writes tests before implementation.".into(),
+            idempotency_key: "lro-new".into(),
+            event_time: Some("2026-05-01T00:00:00Z".parse().unwrap()),
+            tags: None,
+            metadata: None,
+            memory_type: Some("observation".into()),
+            external_refs: None,
+            facets: Facets::default(),
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let out = tools::search::handle(
+        &h.pool,
+        h.embedder.clone(),
+        false,
+        &test_search_cfg(),
+        SearchArgs {
+            profile: h.profile.clone(),
+            query: "writing tests before code".into(),
+            k: Some(10),
+            max_tokens: None,
+            tags: None,
+            min_similarity: None,
+            include_content: None,
+            memory_types: None,
+            exclude_invalidated: None,
+            exclude_superseded: None,
+            ref_filter: None,
+            applies_to: None,
+            include_raw: Some(true),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(out.results.len() >= 3, "should find all three memories");
+
+    // Consolidated hits come first.
+    let first = &out.results[0];
+    assert_eq!(
+        first.layer, "consolidated",
+        "consolidated should come first"
+    );
+
+    // Raw hits come after consolidated.
+    let raw_hits: Vec<_> = out.results.iter().filter(|h| h.layer == "raw").collect();
+    assert!(raw_hits.len() >= 2, "should have at least two raw hits");
+
+    // Verify layer field values are correct.
+    for hit in &out.results {
+        assert!(
+            hit.layer == "consolidated" || hit.layer == "raw",
+            "layer must be 'consolidated' or 'raw', got: {}",
+            hit.layer
+        );
+    }
+}
+
 // ---- supersede_memory ------------------------------------------------
 
 fn store_args(profile: &str, content: &str, key: &str) -> StoreArgs {
