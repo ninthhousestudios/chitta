@@ -165,6 +165,7 @@ fn search_output_envelope_shape() {
         source: None,
         external_refs: None,
         confidence: None,
+        effective_score: None,
         layer: "raw".into(),
     };
     let env: SearchOutput = Envelope::new(vec![hit], false, Some(1), 42);

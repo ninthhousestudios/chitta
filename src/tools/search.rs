@@ -128,6 +128,8 @@ pub struct SearchHit {
     pub external_refs: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_score: Option<f32>,
     pub layer: String,
 }
 
@@ -300,10 +302,16 @@ pub async fn handle(
     let candidates: Vec<SearchHit> = ordered
         .into_iter()
         .map(|hit| {
-            let layer = if consolidated::is_consolidated(&hit.memory_type) {
-                "consolidated"
+            let is_cons = consolidated::is_consolidated(&hit.memory_type);
+            let es = if is_cons {
+                Some(consolidated::effective_score(
+                    hit.confidence.unwrap_or(0.0),
+                    hit.last_reinforced_at,
+                    hit.record_time,
+                    now,
+                ))
             } else {
-                "raw"
+                None
             };
             SearchHit {
                 id: hit.id,
@@ -323,7 +331,8 @@ pub async fn handle(
                 source: hit.source,
                 external_refs: hit.external_refs,
                 confidence: hit.confidence,
-                layer: layer.to_string(),
+                effective_score: es,
+                layer: if is_cons { "consolidated" } else { "raw" }.to_string(),
             }
         })
         .collect();
@@ -499,6 +508,7 @@ mod tests {
             source: None,
             external_refs: None,
             confidence: None,
+            effective_score: None,
             layer: "raw".to_string(),
         }
     }

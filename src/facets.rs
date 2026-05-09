@@ -10,32 +10,16 @@ use crate::tools::search::AppliesTo;
 #[derive(Clone, Debug, Default, PartialEq, Eq, FromRow, Serialize, Deserialize, JsonSchema)]
 pub struct Facets {
     #[sqlx(rename = "applies_to_domains")]
-    #[serde(
-        rename = "applies_to_domains",
-        default,
-        skip_serializing_if = "Vec::is_empty"
-    )]
+    #[serde(rename = "applies_to_domains", default)]
     pub domains: Vec<String>,
     #[sqlx(rename = "applies_to_skills")]
-    #[serde(
-        rename = "applies_to_skills",
-        default,
-        skip_serializing_if = "Vec::is_empty"
-    )]
+    #[serde(rename = "applies_to_skills", default)]
     pub skills: Vec<String>,
     #[sqlx(rename = "applies_to_projects")]
-    #[serde(
-        rename = "applies_to_projects",
-        default,
-        skip_serializing_if = "Vec::is_empty"
-    )]
+    #[serde(rename = "applies_to_projects", default)]
     pub projects: Vec<String>,
     #[sqlx(rename = "applies_to_situations")]
-    #[serde(
-        rename = "applies_to_situations",
-        default,
-        skip_serializing_if = "Vec::is_empty"
-    )]
+    #[serde(rename = "applies_to_situations", default)]
     pub situations: Vec<String>,
 }
 
