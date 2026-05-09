@@ -7,6 +7,7 @@
 
 use chitta::envelope::Envelope;
 use chitta::error::{ChittaError, codes};
+use chitta::facets::Facets;
 use chitta::tools::{
     DeleteArgs, DeleteOutput, DerivationInput, GetArgs, GetOutput, GetProfileArgs,
     GetProfileOutput, ListArgs, ListItem, ListOutput, ReflectStatusArgs, SearchArgs, SearchHit,
@@ -89,10 +90,7 @@ fn store_output_wire_keys() {
         metadata: Some(json!({"k": "v"})),
         memory_type: "observation".into(),
         external_refs: None,
-        applies_to_domains: vec![],
-        applies_to_skills: vec![],
-        applies_to_projects: vec![],
-        applies_to_situations: vec![],
+        facets: Facets::default(),
         confidence: None,
         source: None,
         idempotent_replay: false,
@@ -129,10 +127,7 @@ fn get_output_wire_keys() {
         memory_type: "observation".into(),
         source: None,
         external_refs: None,
-        applies_to_domains: vec![],
-        applies_to_skills: vec![],
-        applies_to_projects: vec![],
-        applies_to_situations: vec![],
+        facets: Facets::default(),
         superseded_by: None,
         confidence: None,
         reinforcement_count: 0,

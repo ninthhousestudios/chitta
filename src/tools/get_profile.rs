@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::db;
 use crate::error::Result;
+use crate::facets::Facets;
 use crate::scoring;
 use crate::tools::validate;
 
@@ -30,10 +31,8 @@ pub struct ProfileEntry {
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
-    pub applies_to_domains: Vec<String>,
-    pub applies_to_skills: Vec<String>,
-    pub applies_to_projects: Vec<String>,
-    pub applies_to_situations: Vec<String>,
+    #[serde(flatten)]
+    pub facets: Facets,
     pub reinforcement_count: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_reinforced_at: Option<DateTime<Utc>>,
@@ -100,10 +99,7 @@ pub async fn handle(pool: &PgPool, args: GetProfileArgs) -> Result<GetProfileOut
             record_time: row.record_time,
             tags: row.tags,
             metadata: row.metadata,
-            applies_to_domains: row.applies_to_domains,
-            applies_to_skills: row.applies_to_skills,
-            applies_to_projects: row.applies_to_projects,
-            applies_to_situations: row.applies_to_situations,
+            facets: row.facets,
             reinforcement_count: row.reinforcement_count,
             last_reinforced_at: row.last_reinforced_at,
         })

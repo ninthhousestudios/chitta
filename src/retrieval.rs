@@ -9,6 +9,7 @@ use crate::config::SearchConfig;
 use crate::db::{self, SearchHit};
 use crate::embedding::EmbedOutput;
 use crate::error::Result;
+use crate::facets::Facets;
 use pgvector::Vector;
 
 pub struct HybridSearchParams<'a> {
@@ -25,10 +26,7 @@ pub struct HybridSearchParams<'a> {
     pub exclude_invalidated: bool,
     pub exclude_superseded: bool,
     pub ref_filter_json: Option<&'a serde_json::Value>,
-    pub applies_to_domains: &'a [String],
-    pub applies_to_skills: &'a [String],
-    pub applies_to_projects: &'a [String],
-    pub applies_to_situations: &'a [String],
+    pub facets: &'a Facets,
 }
 
 #[tracing::instrument(
@@ -55,10 +53,7 @@ pub async fn search_hybrid(
         exclude_invalidated: p.exclude_invalidated,
         exclude_superseded: p.exclude_superseded,
         ref_filter_json: p.ref_filter_json,
-        applies_to_domains: p.applies_to_domains,
-        applies_to_skills: p.applies_to_skills,
-        applies_to_projects: p.applies_to_projects,
-        applies_to_situations: p.applies_to_situations,
+        facets: p.facets,
     };
     let dense_fut = db::search_by_embedding(pool, &dense_params);
 

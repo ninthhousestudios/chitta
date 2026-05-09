@@ -214,10 +214,7 @@ async fn run_replay(profile: Option<String>, limit: i64) -> Result<()> {
                 exclude_invalidated: true,
                 exclude_superseded: false,
                 ref_filter_json: None,
-                applies_to_domains: &[],
-                applies_to_skills: &[],
-                applies_to_projects: &[],
-                applies_to_situations: &[],
+                facets: &chitta::facets::Facets::default(),
             },
         )
         .await

@@ -20,6 +20,7 @@ use crate::db;
 use crate::embedding::Embedder;
 use crate::envelope::{Envelope, estimate_tokens};
 use crate::error::{ChittaError, Result};
+use crate::facets::Facets;
 use crate::tools::validate;
 use crate::validators;
 
@@ -214,10 +215,7 @@ pub async fn handle(
         k
     };
 
-    let at_domains = applies_to.domains.unwrap_or_default();
-    let at_skills = applies_to.skills.unwrap_or_default();
-    let at_projects = applies_to.projects.unwrap_or_default();
-    let at_situations = applies_to.situations.unwrap_or_default();
+    let facets = Facets::from(applies_to);
 
     let embed_out = embedder.embed_full(&query, "search_memories").await?;
     let query_vec = Vector::from(embed_out.dense.clone());
@@ -239,10 +237,7 @@ pub async fn handle(
                 exclude_invalidated,
                 exclude_superseded,
                 ref_filter_json: ref_filter_json.as_ref(),
-                applies_to_domains: &at_domains,
-                applies_to_skills: &at_skills,
-                applies_to_projects: &at_projects,
-                applies_to_situations: &at_situations,
+                facets: &facets,
             },
         )
         .await?
@@ -261,10 +256,7 @@ pub async fn handle(
                 exclude_invalidated,
                 exclude_superseded,
                 ref_filter_json: ref_filter_json.as_ref(),
-                applies_to_domains: &at_domains,
-                applies_to_skills: &at_skills,
-                applies_to_projects: &at_projects,
-                applies_to_situations: &at_situations,
+                facets: &facets,
             },
         )
         .await?

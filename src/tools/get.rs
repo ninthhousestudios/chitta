@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::db;
 use crate::error::{ChittaError, Result};
+use crate::facets::Facets;
 use crate::tools::validate;
 
 const TOOL: &str = "get_memory";
@@ -40,10 +41,8 @@ pub struct GetOutput {
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_refs: Option<serde_json::Value>,
-    pub applies_to_domains: Vec<String>,
-    pub applies_to_skills: Vec<String>,
-    pub applies_to_projects: Vec<String>,
-    pub applies_to_situations: Vec<String>,
+    #[serde(flatten)]
+    pub facets: Facets,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub superseded_by: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -83,10 +82,7 @@ pub async fn handle(pool: &PgPool, args: GetArgs) -> Result<GetOutput> {
         memory_type: row.memory_type,
         source: row.source,
         external_refs: row.external_refs,
-        applies_to_domains: row.applies_to_domains,
-        applies_to_skills: row.applies_to_skills,
-        applies_to_projects: row.applies_to_projects,
-        applies_to_situations: row.applies_to_situations,
+        facets: row.facets,
         superseded_by: row.superseded_by,
         confidence: row.confidence,
         reinforcement_count: row.reinforcement_count,

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::db;
 use crate::error::Result;
+use crate::facets::Facets;
 use crate::tools::validate;
 
 const TOOL: &str = "reflect_status";
@@ -62,29 +63,12 @@ pub async fn handle(pool: &PgPool, args: ReflectStatusArgs) -> Result<ReflectSta
     let rows = db::fetch_raw_since(pool, &args.profile, since).await?;
 
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    let mut domains: BTreeSet<String> = BTreeSet::new();
-    let mut skills: BTreeSet<String> = BTreeSet::new();
-    let mut projects: BTreeSet<String> = BTreeSet::new();
-    let mut situations: BTreeSet<String> = BTreeSet::new();
     let mut disagree_flagged: Vec<DisagreeFlagged> = Vec::new();
     let mut earliest: Option<DateTime<Utc>> = None;
     let mut latest: Option<DateTime<Utc>> = None;
 
     for row in &rows {
         *counts.entry(row.memory_type.clone()).or_default() += 1;
-
-        for d in &row.applies_to_domains {
-            domains.insert(d.clone());
-        }
-        for s in &row.applies_to_skills {
-            skills.insert(s.clone());
-        }
-        for p in &row.applies_to_projects {
-            projects.insert(p.clone());
-        }
-        for s in &row.applies_to_situations {
-            situations.insert(s.clone());
-        }
 
         match earliest {
             None => earliest = Some(row.record_time),
@@ -107,6 +91,8 @@ pub async fn handle(pool: &PgPool, args: ReflectStatusArgs) -> Result<ReflectSta
         }
     }
 
+    let facet_summary = Facets::distinct_union(&rows);
+
     let total = rows.len();
     let date_range = earliest.zip(latest).map(|(e, l)| DateRange {
         earliest: e,
@@ -128,10 +114,10 @@ pub async fn handle(pool: &PgPool, args: ReflectStatusArgs) -> Result<ReflectSta
         counts,
         total,
         date_range,
-        distinct_domains: domains.into_iter().collect(),
-        distinct_skills: skills.into_iter().collect(),
-        distinct_projects: projects.into_iter().collect(),
-        distinct_situations: situations.into_iter().collect(),
+        distinct_domains: facet_summary.domains,
+        distinct_skills: facet_summary.skills,
+        distinct_projects: facet_summary.projects,
+        distinct_situations: facet_summary.situations,
         disagree_flagged,
         run_id: run.id,
     })

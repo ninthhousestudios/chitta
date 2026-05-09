@@ -28,6 +28,7 @@ use chitta::config::{Config, SearchConfig};
 use chitta::db;
 use chitta::embedding::Embedder;
 use chitta::error::ChittaError;
+use chitta::facets::Facets;
 use chitta::tools::{
     self, AppliesTo, DeleteArgs, GetArgs, GetProfileArgs, ListArgs, ReflectStatusArgs, SearchArgs,
     StoreArgs, SupersedeArgs, UpdateArgs,
@@ -233,10 +234,7 @@ async fn idempotent_replay_returns_same_row() {
         metadata: None,
         memory_type: None,
         external_refs: None,
-        applies_to_domains: None,
-        applies_to_skills: None,
-        applies_to_projects: None,
-        applies_to_situations: None,
+        facets: Facets::default(),
         confidence: None,
         source: None,
         derivations: None,
@@ -286,17 +284,14 @@ async fn verbatim_roundtrip_preserves_unicode_and_whitespace() {
             idempotency_key: "v-1".into(),
             event_time: None,
             tags: None,
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -372,16 +367,13 @@ async fn search_max_tokens_triggers_truncated_with_honest_total() {
                 idempotency_key: format!("b-{i}"),
                 event_time: None,
                 tags: None,
-        
+
                 metadata: None,
                 memory_type: None,
                 external_refs: None,
-                applies_to_domains: None,
-                applies_to_skills: None,
-                applies_to_projects: None,
-                applies_to_situations: None,
+                facets: Facets::default(),
                 confidence: None,
-        source: None,
+                source: None,
                 derivations: None,
             },
         )
@@ -443,17 +435,14 @@ async fn error_contract_invalid_event_time_populates_next_action() {
                     .unwrap(),
             ),
             tags: None,
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -506,17 +495,14 @@ async fn search_snippet_is_verbatim_prefix() {
             idempotency_key: "s-1".into(),
             event_time: None,
             tags: None,
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -570,17 +556,14 @@ async fn profile_isolation_keeps_searches_scoped() {
             idempotency_key: "a-1".into(),
             event_time: None,
             tags: None,
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -629,17 +612,14 @@ async fn content_too_long_rejected_with_token_count() {
             idempotency_key: "l-1".into(),
             event_time: None,
             tags: None,
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -670,10 +650,7 @@ async fn concurrent_duplicate_writes_converge_on_one_row() {
         metadata: None,
         memory_type: None,
         external_refs: None,
-        applies_to_domains: None,
-        applies_to_skills: None,
-        applies_to_projects: None,
-        applies_to_situations: None,
+        facets: Facets::default(),
         confidence: None,
         source: None,
         derivations: None,
@@ -717,17 +694,14 @@ async fn search_finds_stored_memory_by_semantic_similarity() {
             idempotency_key: "sem-1".into(),
             event_time: None,
             tags: Some(vec!["db".into(), "perf".into()]),
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -784,17 +758,14 @@ async fn update_memory_content_reembeds() {
             idempotency_key: "uc-1".into(),
             event_time: None,
             tags: None,
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -845,17 +816,14 @@ async fn update_memory_tags_only_no_reembed() {
             idempotency_key: "ut-1".into(),
             event_time: None,
             tags: Some(vec!["old".into()]),
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -957,17 +925,14 @@ async fn soft_delete_hides_memory() {
             idempotency_key: "d-1".into(),
             event_time: None,
             tags: None,
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -1016,17 +981,14 @@ async fn restore_after_soft_delete_creates_new_row() {
             idempotency_key: "reuse-key".into(),
             event_time: None,
             tags: None,
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -1052,23 +1014,23 @@ async fn restore_after_soft_delete_creates_new_row() {
             idempotency_key: "reuse-key".into(),
             event_time: None,
             tags: None,
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
     .unwrap();
 
-    assert!(!second.idempotent_replay, "should be a fresh store, not a replay");
+    assert!(
+        !second.idempotent_replay,
+        "should be a fresh store, not a replay"
+    );
     assert_ne!(second.id, first.id, "new row should have a different id");
     assert_eq!(second.content, "replacement content");
 }
@@ -1109,16 +1071,13 @@ async fn list_recent_returns_time_ordered() {
                 idempotency_key: format!("lo-{i}"),
                 event_time: None,
                 tags: None,
-        
+
                 metadata: None,
                 memory_type: None,
                 external_refs: None,
-                applies_to_domains: None,
-                applies_to_skills: None,
-                applies_to_projects: None,
-                applies_to_situations: None,
+                facets: Facets::default(),
                 confidence: None,
-        source: None,
+                source: None,
                 derivations: None,
             },
         )
@@ -1165,16 +1124,13 @@ async fn list_recent_respects_limit() {
                 idempotency_key: format!("ll-{i}"),
                 event_time: None,
                 tags: None,
-        
+
                 metadata: None,
                 memory_type: None,
                 external_refs: None,
-                applies_to_domains: None,
-                applies_to_skills: None,
-                applies_to_projects: None,
-                applies_to_situations: None,
+                facets: Facets::default(),
                 confidence: None,
-        source: None,
+                source: None,
                 derivations: None,
             },
         )
@@ -1215,17 +1171,14 @@ async fn search_with_tag_filter_returns_only_matching() {
             idempotency_key: "tf-1".into(),
             event_time: None,
             tags: Some(vec!["rust".into()]),
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -1240,17 +1193,14 @@ async fn search_with_tag_filter_returns_only_matching() {
             idempotency_key: "tf-2".into(),
             event_time: None,
             tags: Some(vec!["python".into()]),
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -1307,17 +1257,14 @@ async fn search_with_min_similarity_filters_low_scores() {
             idempotency_key: "ms-1".into(),
             event_time: None,
             tags: None,
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -1369,16 +1316,13 @@ async fn truncated_false_when_all_results_fit() {
                 idempotency_key: format!("tr-{i}"),
                 event_time: None,
                 tags: None,
-        
+
                 metadata: None,
                 memory_type: None,
                 external_refs: None,
-                applies_to_domains: None,
-                applies_to_skills: None,
-                applies_to_projects: None,
-                applies_to_situations: None,
+                facets: Facets::default(),
                 confidence: None,
-        source: None,
+                source: None,
                 derivations: None,
             },
         )
@@ -1432,17 +1376,14 @@ async fn get_memory_cross_profile_isolation() {
             idempotency_key: "xp-1".into(),
             event_time: None,
             tags: None,
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -1484,17 +1425,14 @@ async fn store_with_non_default_memory_type_roundtrips() {
             idempotency_key: "mt-1".into(),
             event_time: None,
             tags: None,
-    
+
             metadata: None,
             memory_type: Some("observation".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -1541,16 +1479,13 @@ async fn search_memory_types_filter_excludes_non_matching() {
                 idempotency_key: key.into(),
                 event_time: None,
                 tags: None,
-        
+
                 metadata: None,
                 memory_type: Some(mt.into()),
                 external_refs: None,
-                applies_to_domains: None,
-                applies_to_skills: None,
-                applies_to_projects: None,
-                applies_to_situations: None,
+                facets: Facets::default(),
                 confidence: None,
-        source: None,
+                source: None,
                 derivations: None,
             },
         )
@@ -1604,17 +1539,14 @@ async fn invalid_memory_type_store_rejected() {
             idempotency_key: "bad-1".into(),
             event_time: None,
             tags: None,
-    
+
             metadata: None,
             memory_type: Some("bogus".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -1641,17 +1573,14 @@ async fn search_returns_score_and_similarity() {
             idempotency_key: "sc-1".into(),
             event_time: None,
             tags: None,
-    
+
             metadata: None,
             memory_type: None,
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
-        source: None,
-        derivations: None,
+            source: None,
+            derivations: None,
         },
     )
     .await
@@ -1710,10 +1639,7 @@ async fn episode_with_derivations_writes_atomically() {
             metadata: None,
             memory_type: Some("observation".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
             source: None,
             derivations: None,
@@ -1734,10 +1660,7 @@ async fn episode_with_derivations_writes_atomically() {
             metadata: None,
             memory_type: Some("observation".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
             source: None,
             derivations: None,
@@ -1759,10 +1682,7 @@ async fn episode_with_derivations_writes_atomically() {
             metadata: None,
             memory_type: Some("episode".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
             source: None,
             derivations: Some(vec![
@@ -1810,10 +1730,7 @@ async fn episode_without_derivations_rejected() {
             metadata: None,
             memory_type: Some("episode".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
             source: None,
             derivations: None,
@@ -1854,10 +1771,7 @@ async fn episode_with_empty_derivations_rejected() {
             metadata: None,
             memory_type: Some("episode".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
             source: None,
             derivations: Some(vec![]),
@@ -1900,10 +1814,7 @@ async fn episode_derivation_invalid_source_id_rolls_back() {
             metadata: None,
             memory_type: Some("episode".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
             source: None,
             derivations: Some(vec![tools::DerivationInput {
@@ -1934,8 +1845,16 @@ async fn search_default_excludes_raw_types() {
 
     // Store one consolidated and one raw memory.
     for (key, content, mt) in [
-        ("dc-1", "Josh values clean interfaces above all.", "preference"),
-        ("dc-2", "Josh said he prefers small PRs today.", "observation"),
+        (
+            "dc-1",
+            "Josh values clean interfaces above all.",
+            "preference",
+        ),
+        (
+            "dc-2",
+            "Josh said he prefers small PRs today.",
+            "observation",
+        ),
     ] {
         tools::store::handle(
             &h.pool,
@@ -1949,10 +1868,7 @@ async fn search_default_excludes_raw_types() {
                 metadata: None,
                 memory_type: Some(mt.into()),
                 external_refs: None,
-                applies_to_domains: None,
-                applies_to_skills: None,
-                applies_to_projects: None,
-                applies_to_situations: None,
+                facets: Facets::default(),
                 confidence: None,
                 source: None,
                 derivations: None,
@@ -1989,7 +1905,8 @@ async fn search_default_excludes_raw_types() {
 
     for hit in &out.results {
         assert!(
-            ["trait", "value", "pattern", "preference", "mental_model"].contains(&hit.memory_type.as_str()),
+            ["trait", "value", "pattern", "preference", "mental_model"]
+                .contains(&hit.memory_type.as_str()),
             "default search should only return consolidated types, got: {}",
             hit.memory_type
         );
@@ -2002,8 +1919,16 @@ async fn search_include_raw_returns_all_types() {
     let h = require_harness!("include_raw");
 
     for (key, content, mt) in [
-        ("ir-1", "Josh values clean code and small functions.", "preference"),
-        ("ir-2", "Josh mentioned he dislikes large monolithic commits.", "observation"),
+        (
+            "ir-1",
+            "Josh values clean code and small functions.",
+            "preference",
+        ),
+        (
+            "ir-2",
+            "Josh mentioned he dislikes large monolithic commits.",
+            "observation",
+        ),
     ] {
         tools::store::handle(
             &h.pool,
@@ -2017,10 +1942,7 @@ async fn search_include_raw_returns_all_types() {
                 metadata: None,
                 memory_type: Some(mt.into()),
                 external_refs: None,
-                applies_to_domains: None,
-                applies_to_skills: None,
-                applies_to_projects: None,
-                applies_to_situations: None,
+                facets: Facets::default(),
                 confidence: None,
                 source: None,
                 derivations: None,
@@ -2078,10 +2000,10 @@ async fn search_applies_to_single_facet() {
             metadata: None,
             memory_type: Some("preference".into()),
             external_refs: None,
-            applies_to_domains: Some(vec!["rust".into()]),
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets {
+                domains: vec!["rust".into()],
+                ..Default::default()
+            },
             confidence: None,
             source: None,
             derivations: None,
@@ -2102,10 +2024,10 @@ async fn search_applies_to_single_facet() {
             metadata: None,
             memory_type: Some("preference".into()),
             external_refs: None,
-            applies_to_domains: Some(vec!["python".into()]),
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets {
+                domains: vec!["python".into()],
+                ..Default::default()
+            },
             confidence: None,
             source: None,
             derivations: None,
@@ -2171,10 +2093,11 @@ async fn search_applies_to_multi_facet_intersection() {
             metadata: None,
             memory_type: Some("preference".into()),
             external_refs: None,
-            applies_to_domains: Some(vec!["rust".into()]),
-            applies_to_skills: Some(vec!["review".into()]),
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets {
+                domains: vec!["rust".into()],
+                skills: vec!["review".into()],
+                ..Default::default()
+            },
             confidence: None,
             source: None,
             derivations: None,
@@ -2196,10 +2119,11 @@ async fn search_applies_to_multi_facet_intersection() {
             metadata: None,
             memory_type: Some("preference".into()),
             external_refs: None,
-            applies_to_domains: Some(vec!["rust".into()]),
-            applies_to_skills: Some(vec!["planning".into()]),
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets {
+                domains: vec!["rust".into()],
+                skills: vec!["planning".into()],
+                ..Default::default()
+            },
             confidence: None,
             source: None,
             derivations: None,
@@ -2238,7 +2162,10 @@ async fn search_applies_to_multi_facet_intersection() {
     .await
     .unwrap();
 
-    assert!(!out.results.is_empty(), "should find the review+rust memory");
+    assert!(
+        !out.results.is_empty(),
+        "should find the review+rust memory"
+    );
     for hit in &out.results {
         let content = hit.content.as_deref().unwrap_or(&hit.snippet);
         assert!(
@@ -2265,10 +2192,7 @@ async fn search_excludes_superseded_by_default() {
             metadata: None,
             memory_type: Some("preference".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
             source: None,
             derivations: None,
@@ -2289,10 +2213,7 @@ async fn search_excludes_superseded_by_default() {
             metadata: None,
             memory_type: Some("preference".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
             source: None,
             derivations: None,
@@ -2361,10 +2282,7 @@ async fn search_excludes_invalidated_by_default() {
             metadata: None,
             memory_type: Some("preference".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
             source: None,
             derivations: None,
@@ -2463,10 +2381,7 @@ fn store_args(profile: &str, content: &str, key: &str) -> StoreArgs {
         metadata: None,
         memory_type: Some("trait".into()),
         external_refs: None,
-        applies_to_domains: None,
-        applies_to_skills: None,
-        applies_to_projects: None,
-        applies_to_situations: None,
+        facets: Facets::default(),
         confidence: Some(0.7),
         source: None,
         derivations: None,
@@ -2683,7 +2598,11 @@ async fn superseded_row_excluded_from_default_search() {
     let old = tools::store::handle(
         &h.pool,
         h.embedder.clone(),
-        store_args(&h.profile, "Josh strongly prefers tabs over spaces in all code", "sup-srch-old"),
+        store_args(
+            &h.profile,
+            "Josh strongly prefers tabs over spaces in all code",
+            "sup-srch-old",
+        ),
     )
     .await
     .unwrap();
@@ -2691,7 +2610,11 @@ async fn superseded_row_excluded_from_default_search() {
     let new = tools::store::handle(
         &h.pool,
         h.embedder.clone(),
-        store_args(&h.profile, "Josh strongly prefers spaces over tabs in all code", "sup-srch-new"),
+        store_args(
+            &h.profile,
+            "Josh strongly prefers spaces over tabs in all code",
+            "sup-srch-new",
+        ),
     )
     .await
     .unwrap();
@@ -2788,10 +2711,7 @@ async fn get_profile_returns_top_30_by_effective_score() {
                 metadata: None,
                 memory_type: Some(memory_type.into()),
                 external_refs: None,
-                applies_to_domains: None,
-                applies_to_skills: None,
-                applies_to_projects: None,
-                applies_to_situations: None,
+                facets: Facets::default(),
                 confidence: Some(confidence),
                 source: None,
                 derivations: None,
@@ -2826,10 +2746,7 @@ async fn get_profile_returns_top_30_by_effective_score() {
             metadata: None,
             memory_type: Some("observation".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: Some(0.99),
             source: None,
             derivations: None,
@@ -2921,10 +2838,11 @@ async fn reflect_status_counts_raw_rows_since_last_run() {
                 metadata: None,
                 memory_type: Some("observation".into()),
                 external_refs: None,
-                applies_to_domains: Some(vec!["rust".into()]),
-                applies_to_skills: None,
-                applies_to_projects: Some(vec!["chitta".into()]),
-                applies_to_situations: None,
+                facets: Facets {
+                    domains: vec!["rust".into()],
+                    projects: vec!["chitta".into()],
+                    ..Default::default()
+                },
                 confidence: None,
                 source: None,
                 derivations: None,
@@ -2947,10 +2865,7 @@ async fn reflect_status_counts_raw_rows_since_last_run() {
             metadata: None,
             memory_type: Some("observation".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
             source: None,
             derivations: None,
@@ -2972,10 +2887,7 @@ async fn reflect_status_counts_raw_rows_since_last_run() {
             metadata: None,
             memory_type: Some("trait".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: Some(0.80),
             source: None,
             derivations: None,
@@ -2994,7 +2906,10 @@ async fn reflect_status_counts_raw_rows_since_last_run() {
     .await
     .unwrap();
 
-    assert_eq!(r1.total, 4, "should see 3 observations + 1 disagree-flagged");
+    assert_eq!(
+        r1.total, 4,
+        "should see 3 observations + 1 disagree-flagged"
+    );
     assert_eq!(r1.counts.get("observation"), Some(&4));
     assert!(r1.since.is_none(), "first run should have no prior run");
     assert_eq!(r1.disagree_flagged.len(), 1);
@@ -3015,10 +2930,7 @@ async fn reflect_status_counts_raw_rows_since_last_run() {
             metadata: None,
             memory_type: Some("observation".into()),
             external_refs: None,
-            applies_to_domains: None,
-            applies_to_skills: None,
-            applies_to_projects: None,
-            applies_to_situations: None,
+            facets: Facets::default(),
             confidence: None,
             source: None,
             derivations: None,
@@ -3037,8 +2949,14 @@ async fn reflect_status_counts_raw_rows_since_last_run() {
     .await
     .unwrap();
 
-    assert_eq!(r2.total, 1, "second run should only see rows since first run");
-    assert!(r2.since.is_some(), "should reference the first run's timestamp");
+    assert_eq!(
+        r2.total, 1,
+        "second run should only see rows since first run"
+    );
+    assert!(
+        r2.since.is_some(),
+        "should reference the first run's timestamp"
+    );
     assert_eq!(r2.last_run_id, Some(r1.run_id));
     assert_eq!(r2.disagree_flagged.len(), 0);
 }

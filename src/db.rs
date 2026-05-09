@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use crate::config::Config;
 use crate::error::{ChittaError, Result};
+use crate::facets::Facets;
 
 /// One row of `memories`. Mirrors the v0 schema (0001_init.sql).
 #[derive(Debug, Clone, FromRow)]
@@ -31,10 +32,8 @@ pub struct MemoryRow {
     pub tags: Vec<String>,
     pub external_refs: Option<serde_json::Value>,
     pub metadata: Option<serde_json::Value>,
-    pub applies_to_domains: Vec<String>,
-    pub applies_to_skills: Vec<String>,
-    pub applies_to_projects: Vec<String>,
-    pub applies_to_situations: Vec<String>,
+    #[sqlx(flatten)]
+    pub facets: Facets,
     pub superseded_by: Option<Uuid>,
     pub confidence: Option<f32>,
     pub reinforcement_count: i32,
@@ -86,10 +85,7 @@ pub struct SearchParams<'a> {
     pub exclude_invalidated: bool,
     pub exclude_superseded: bool,
     pub ref_filter_json: Option<&'a serde_json::Value>,
-    pub applies_to_domains: &'a [String],
-    pub applies_to_skills: &'a [String],
-    pub applies_to_projects: &'a [String],
-    pub applies_to_situations: &'a [String],
+    pub facets: &'a Facets,
 }
 
 pub struct QueryLogInput<'a> {
@@ -157,10 +153,10 @@ pub async fn insert_or_fetch_memory(pool: &PgPool, new: &MemoryRow) -> Result<(M
     .bind(&new.tags)
     .bind(&new.external_refs)
     .bind(&new.metadata)
-    .bind(&new.applies_to_domains)
-    .bind(&new.applies_to_skills)
-    .bind(&new.applies_to_projects)
-    .bind(&new.applies_to_situations)
+    .bind(&new.facets.domains)
+    .bind(&new.facets.skills)
+    .bind(&new.facets.projects)
+    .bind(&new.facets.situations)
     .bind(new.superseded_by)
     .bind(new.confidence)
     .bind(new.reinforcement_count)
@@ -406,34 +402,29 @@ pub async fn search_by_embedding(
     let ef_search = (p.k.max(1) * 4).clamp(HNSW_EF_SEARCH_MIN, HNSW_EF_SEARCH_MAX);
     let mut tx = pool.begin().await?;
 
-    let total: i64 = sqlx::query_scalar(
-        r#"
-        select count(*)::bigint
-        from memories
-        where profile = $1
-          and (not $4 or invalidated_at is null)
-          and (not $5 or superseded_by is null)
-          and ($2::text[] = '{}' or tags && $2)
-          and ($3::text[] = '{}' or memory_type = ANY($3))
-          and ($6::jsonb is null or external_refs @> $6)
-          and ($7::text[] = '{}' or applies_to_domains @> $7)
-          and ($8::text[] = '{}' or applies_to_skills @> $8)
-          and ($9::text[] = '{}' or applies_to_projects @> $9)
-          and ($10::text[] = '{}' or applies_to_situations @> $10)
-        "#,
-    )
-    .bind(p.profile)
-    .bind(p.tags)
-    .bind(p.memory_types)
-    .bind(p.exclude_invalidated)
-    .bind(p.exclude_superseded)
-    .bind(p.ref_filter_json)
-    .bind(p.applies_to_domains)
-    .bind(p.applies_to_skills)
-    .bind(p.applies_to_projects)
-    .bind(p.applies_to_situations)
-    .fetch_one(&mut *tx)
-    .await?;
+    let facet_clauses = Facets::sql_filter_clauses(7);
+    let count_sql = format!(
+        "SELECT count(*)::bigint FROM memories \
+         WHERE profile = $1 \
+         AND (NOT $4 OR invalidated_at IS NULL) \
+         AND (NOT $5 OR superseded_by IS NULL) \
+         AND ($2::text[] = '{{}}' OR tags && $2) \
+         AND ($3::text[] = '{{}}' OR memory_type = ANY($3)) \
+         AND ($6::jsonb IS NULL OR external_refs @> $6){facet_clauses}"
+    );
+    let total: i64 = sqlx::query_scalar(&count_sql)
+        .bind(p.profile)
+        .bind(p.tags)
+        .bind(p.memory_types)
+        .bind(p.exclude_invalidated)
+        .bind(p.exclude_superseded)
+        .bind(p.ref_filter_json)
+        .bind(&p.facets.domains)
+        .bind(&p.facets.skills)
+        .bind(&p.facets.projects)
+        .bind(&p.facets.situations)
+        .fetch_one(&mut *tx)
+        .await?;
 
     sqlx::query(&format!("set local hnsw.ef_search = {ef_search}"))
         .execute(&mut *tx)
@@ -442,51 +433,38 @@ pub async fn search_by_embedding(
     let use_recency = p.recency_weight > 0.0;
     let fetch_limit = if use_recency { p.k * 2 } else { p.k };
 
-    let hits = sqlx::query_as::<_, SearchHit>(
-        r#"
-        select
-            id,
-            content,
-            event_time,
-            record_time,
-            tags,
-            (1.0 - (embedding <=> $2))::real as similarity,
-            source,
-            metadata,
-            memory_type,
-            external_refs,
-            confidence
-        from memories
-        where profile = $1
-          and (not $7 or invalidated_at is null)
-          and (not $8 or superseded_by is null)
-          and ($3::text[] = '{}' or tags && $3)
-          and ($6::text[] = '{}' or memory_type = ANY($6))
-          and (1.0 - (embedding <=> $2))::real >= $4
-          and ($9::jsonb is null or external_refs @> $9)
-          and ($10::text[] = '{}' or applies_to_domains @> $10)
-          and ($11::text[] = '{}' or applies_to_skills @> $11)
-          and ($12::text[] = '{}' or applies_to_projects @> $12)
-          and ($13::text[] = '{}' or applies_to_situations @> $13)
-        order by embedding <=> $2
-        limit $5
-        "#,
-    )
-    .bind(p.profile)
-    .bind(p.query)
-    .bind(p.tags)
-    .bind(p.min_similarity)
-    .bind(fetch_limit)
-    .bind(p.memory_types)
-    .bind(p.exclude_invalidated)
-    .bind(p.exclude_superseded)
-    .bind(p.ref_filter_json)
-    .bind(p.applies_to_domains)
-    .bind(p.applies_to_skills)
-    .bind(p.applies_to_projects)
-    .bind(p.applies_to_situations)
-    .fetch_all(&mut *tx)
-    .await?;
+    let search_facet_clauses = Facets::sql_filter_clauses(10);
+    let search_sql = format!(
+        "SELECT id, content, event_time, record_time, tags, \
+         (1.0 - (embedding <=> $2))::real AS similarity, \
+         source, metadata, memory_type, external_refs, confidence \
+         FROM memories \
+         WHERE profile = $1 \
+         AND (NOT $7 OR invalidated_at IS NULL) \
+         AND (NOT $8 OR superseded_by IS NULL) \
+         AND ($3::text[] = '{{}}' OR tags && $3) \
+         AND ($6::text[] = '{{}}' OR memory_type = ANY($6)) \
+         AND (1.0 - (embedding <=> $2))::real >= $4 \
+         AND ($9::jsonb IS NULL OR external_refs @> $9){search_facet_clauses} \
+         ORDER BY embedding <=> $2 \
+         LIMIT $5"
+    );
+    let hits = sqlx::query_as::<_, SearchHit>(&search_sql)
+        .bind(p.profile)
+        .bind(p.query)
+        .bind(p.tags)
+        .bind(p.min_similarity)
+        .bind(fetch_limit)
+        .bind(p.memory_types)
+        .bind(p.exclude_invalidated)
+        .bind(p.exclude_superseded)
+        .bind(p.ref_filter_json)
+        .bind(&p.facets.domains)
+        .bind(&p.facets.skills)
+        .bind(&p.facets.projects)
+        .bind(&p.facets.situations)
+        .fetch_all(&mut *tx)
+        .await?;
 
     let mut hits: Vec<SearchHit> = hits
         .into_iter()
@@ -686,10 +664,10 @@ pub async fn insert_memory_with_derivations(
     .bind(&new.tags)
     .bind(&new.external_refs)
     .bind(&new.metadata)
-    .bind(&new.applies_to_domains)
-    .bind(&new.applies_to_skills)
-    .bind(&new.applies_to_projects)
-    .bind(&new.applies_to_situations)
+    .bind(&new.facets.domains)
+    .bind(&new.facets.skills)
+    .bind(&new.facets.projects)
+    .bind(&new.facets.situations)
     .bind(new.superseded_by)
     .bind(new.confidence)
     .bind(new.reinforcement_count)

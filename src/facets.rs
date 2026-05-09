@@ -1,13 +1,41 @@
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
+
 use crate::tools::search::AppliesTo;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, FromRow, Serialize, Deserialize, JsonSchema)]
 pub struct Facets {
+    #[sqlx(rename = "applies_to_domains")]
+    #[serde(
+        rename = "applies_to_domains",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub domains: Vec<String>,
+    #[sqlx(rename = "applies_to_skills")]
+    #[serde(
+        rename = "applies_to_skills",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub skills: Vec<String>,
+    #[sqlx(rename = "applies_to_projects")]
+    #[serde(
+        rename = "applies_to_projects",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub projects: Vec<String>,
+    #[sqlx(rename = "applies_to_situations")]
+    #[serde(
+        rename = "applies_to_situations",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub situations: Vec<String>,
 }
 
@@ -61,11 +89,45 @@ impl Facets {
     }
 }
 
+impl Facets {
+    /// Generate `AND ($N::text[] = '{}' OR col @> $N)` clauses for all four
+    /// facet columns. Always emits exactly 4 parameters starting at `start`.
+    pub fn sql_filter_clauses(start: i32) -> String {
+        const COLUMNS: &[&str] = &[
+            "applies_to_domains",
+            "applies_to_skills",
+            "applies_to_projects",
+            "applies_to_situations",
+        ];
+        let mut sql = String::new();
+        for (i, col) in COLUMNS.iter().enumerate() {
+            let p = start + i as i32;
+            write!(sql, "\n      AND (${p}::text[] = '{{}}' OR {col} @> ${p})").unwrap();
+        }
+        sql
+    }
+}
+
 pub trait HasFacets {
     fn domains(&self) -> &[String];
     fn skills(&self) -> &[String];
     fn projects(&self) -> &[String];
     fn situations(&self) -> &[String];
+}
+
+impl HasFacets for crate::db::MemoryRow {
+    fn domains(&self) -> &[String] {
+        &self.facets.domains
+    }
+    fn skills(&self) -> &[String] {
+        &self.facets.skills
+    }
+    fn projects(&self) -> &[String] {
+        &self.facets.projects
+    }
+    fn situations(&self) -> &[String] {
+        &self.facets.situations
+    }
 }
 
 impl HasFacets for Facets {

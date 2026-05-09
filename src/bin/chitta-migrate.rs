@@ -21,6 +21,7 @@ use chitta::config::{Config, chitta_home};
 use chitta::db::{self, MemoryRow};
 use chitta::embedding::Embedder;
 use chitta::error::ChittaError;
+use chitta::facets::Facets;
 use chitta::tools::validate;
 use chitta::validators;
 use chitta::validators::DerivationInput;
@@ -83,14 +84,8 @@ struct MigrateRow {
     external_refs: Option<serde_json::Value>,
     #[serde(default)]
     metadata: Option<serde_json::Value>,
-    #[serde(default)]
-    applies_to_domains: Option<Vec<String>>,
-    #[serde(default)]
-    applies_to_skills: Option<Vec<String>>,
-    #[serde(default)]
-    applies_to_projects: Option<Vec<String>>,
-    #[serde(default)]
-    applies_to_situations: Option<Vec<String>>,
+    #[serde(flatten)]
+    facets: Facets,
     #[serde(default)]
     confidence: Option<f32>,
     #[serde(default)]
@@ -384,10 +379,7 @@ async fn seed_one_row(pool: &PgPool, embedder: &Arc<Embedder>, row: MigrateRow) 
         tags,
         external_refs: row.external_refs,
         metadata: row.metadata,
-        applies_to_domains: row.applies_to_domains.unwrap_or_default(),
-        applies_to_skills: row.applies_to_skills.unwrap_or_default(),
-        applies_to_projects: row.applies_to_projects.unwrap_or_default(),
-        applies_to_situations: row.applies_to_situations.unwrap_or_default(),
+        facets: row.facets,
         superseded_by: None,
         confidence: row.confidence,
         reinforcement_count: 0,

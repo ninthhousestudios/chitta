@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::db::{self, MemoryRow};
 use crate::embedding::Embedder;
 use crate::error::{ChittaError, Result};
+use crate::facets::Facets;
 use crate::tools::validate;
 use crate::validators;
 pub use crate::validators::DerivationInput;
@@ -50,18 +51,9 @@ pub struct StoreArgs {
     /// Kinds: file, commit, yojana_task, memory, url, session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_refs: Option<serde_json::Value>,
-    /// Domain facets for retrieval scoping.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub applies_to_domains: Option<Vec<String>>,
-    /// Skill facets for retrieval scoping.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub applies_to_skills: Option<Vec<String>>,
-    /// Project facets for retrieval scoping.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub applies_to_projects: Option<Vec<String>>,
-    /// Situation facets for retrieval scoping.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub applies_to_situations: Option<Vec<String>>,
+    /// Context facets for retrieval scoping (domains, skills, projects, situations).
+    #[serde(flatten)]
+    pub facets: Facets,
     /// Confidence score (0.0–1.0). Typically NULL for raw-layer types.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
@@ -87,10 +79,8 @@ pub struct StoreOutput {
     pub memory_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_refs: Option<serde_json::Value>,
-    pub applies_to_domains: Vec<String>,
-    pub applies_to_skills: Vec<String>,
-    pub applies_to_projects: Vec<String>,
-    pub applies_to_situations: Vec<String>,
+    #[serde(flatten)]
+    pub facets: Facets,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -159,10 +149,7 @@ pub async fn handle(
         tags,
         external_refs: args.external_refs,
         metadata: args.metadata,
-        applies_to_domains: args.applies_to_domains.unwrap_or_default(),
-        applies_to_skills: args.applies_to_skills.unwrap_or_default(),
-        applies_to_projects: args.applies_to_projects.unwrap_or_default(),
-        applies_to_situations: args.applies_to_situations.unwrap_or_default(),
+        facets: args.facets,
         superseded_by: None,
         confidence: args.confidence,
         reinforcement_count: 0,
@@ -201,10 +188,7 @@ fn row_to_output(row: MemoryRow, replayed: bool) -> StoreOutput {
         metadata: row.metadata,
         memory_type: row.memory_type,
         external_refs: row.external_refs,
-        applies_to_domains: row.applies_to_domains,
-        applies_to_skills: row.applies_to_skills,
-        applies_to_projects: row.applies_to_projects,
-        applies_to_situations: row.applies_to_situations,
+        facets: row.facets,
         confidence: row.confidence,
         source: row.source,
         idempotent_replay: replayed,

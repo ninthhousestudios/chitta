@@ -21,6 +21,7 @@ use uuid::Uuid;
 use crate::db;
 use crate::embedding::Embedder;
 use crate::error::ChittaError;
+use crate::facets::Facets;
 
 #[derive(Debug, Deserialize)]
 pub struct IngestRequest {
@@ -250,10 +251,10 @@ async fn process_item(
             tags: build_tags(item.project.as_deref(), &item.source),
             external_refs: None,
             metadata: None,
-            applies_to_domains: vec![],
-            applies_to_skills: vec![],
-            applies_to_projects: item.project.iter().cloned().collect(),
-            applies_to_situations: vec![],
+            facets: Facets {
+                projects: item.project.iter().cloned().collect(),
+                ..Default::default()
+            },
             superseded_by: None,
             confidence: None,
             reinforcement_count: 0,
