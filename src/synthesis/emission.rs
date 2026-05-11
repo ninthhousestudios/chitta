@@ -65,7 +65,21 @@ fn cluster_idem_key(cluster: &Cluster) -> String {
     )
 }
 
-pub async fn emit_consolidated(
+pub async fn emit_consolidated_auto(
+    pool: &PgPool,
+    embedder: &Arc<Embedder>,
+    cluster: &Cluster,
+    profile: &str,
+    now: DateTime<Utc>,
+    source_facets: Facets,
+) -> Result<(MemoryRow, bool)> {
+    let embed_out = embedder
+        .embed_full(&cluster.representative_claim, "reflect")
+        .await?;
+    emit_consolidated(pool, &embed_out, cluster, profile, now, source_facets).await
+}
+
+pub(crate) async fn emit_consolidated(
     pool: &PgPool,
     claim_embedding: &crate::embedding::EmbedOutput,
     cluster: &Cluster,
@@ -94,7 +108,7 @@ pub async fn emit_consolidated(
     db::insert_memory_with_derivations(pool, &row, &derivations).await
 }
 
-pub async fn emit_with_supersession(
+pub(crate) async fn emit_with_supersession(
     pool: &PgPool,
     embedder: &Arc<Embedder>,
     claim_embedding: &crate::embedding::EmbedOutput,

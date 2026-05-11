@@ -23,7 +23,8 @@ mod threshold;
 pub use clustering::cluster_candidates;
 pub use contradiction::detect_contradiction;
 pub use disagree::find_disagree_targets;
-pub use emission::{emit_consolidated, emit_with_supersession, emission_confidence};
+pub(crate) use emission::{emit_consolidated, emit_with_supersession};
+pub use emission::{emit_consolidated_auto, emission_confidence};
 pub use extraction::extract_candidates;
 pub use threshold::check_threshold;
 
@@ -113,16 +114,24 @@ fn pre_filter_existing<'a>(
     existing: &'a [MemoryRow],
     top_k: usize,
 ) -> Vec<&'a MemoryRow> {
-    let mut scored: Vec<(f32, &MemoryRow)> = existing
-        .iter()
-        .filter_map(|row| {
-            let emb = row.embedding.as_ref()?;
-            let sim = cosine_similarity(claim_embedding, emb.as_slice());
-            Some((sim, row))
-        })
-        .collect();
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    scored.into_iter().take(top_k).map(|(_, row)| row).collect()
+    let mut embedded: Vec<(f32, &MemoryRow)> = Vec::new();
+    let mut unembedded: Vec<&MemoryRow> = Vec::new();
+
+    for row in existing {
+        match row.embedding.as_ref() {
+            Some(emb) => {
+                let sim = cosine_similarity(claim_embedding, emb.as_slice());
+                embedded.push((sim, row));
+            }
+            None => unembedded.push(row),
+        }
+    }
+
+    embedded.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut result: Vec<&MemoryRow> =
+        embedded.into_iter().take(top_k).map(|(_, row)| row).collect();
+    result.extend(unembedded);
+    result
 }
 
 pub struct SynthesisResult {
@@ -369,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn pre_filter_skips_rows_without_embedding() {
+    fn pre_filter_includes_unembedded_rows_as_fallback() {
         let claim = vec![1.0, 0.0, 0.0];
 
         let rows = vec![
@@ -380,8 +389,9 @@ mod tests {
         ];
 
         let filtered = pre_filter_existing(&claim, &rows, 10);
-        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered.len(), 2);
         assert_eq!(filtered[0].content, "has embedding");
+        assert_eq!(filtered[1].content, "no embedding");
     }
 
     #[test]

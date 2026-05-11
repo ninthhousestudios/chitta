@@ -3789,15 +3789,9 @@ async fn synthesis_cluster_and_emit() {
         "min(0.90, 0.50 + 0.05*6) = 0.80"
     );
 
-    let claim_embedding = h
-        .embedder
-        .embed_full(&clusters[0].representative_claim, "reflect")
-        .await
-        .unwrap();
-
-    let (emitted, replayed) = synthesis::emit_consolidated(
+    let (emitted, replayed) = synthesis::emit_consolidated_auto(
         &h.pool,
-        &claim_embedding,
+        &h.embedder,
         &clusters[0],
         &h.profile,
         Utc::now(),
@@ -3826,9 +3820,9 @@ async fn synthesis_cluster_and_emit() {
     }
 
     // Idempotency: re-emit the same cluster → replay
-    let (_, replayed2) = synthesis::emit_consolidated(
+    let (_, replayed2) = synthesis::emit_consolidated_auto(
         &h.pool,
-        &claim_embedding,
+        &h.embedder,
         &clusters[0],
         &h.profile,
         Utc::now(),
