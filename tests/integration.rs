@@ -3799,3 +3799,343 @@ async fn synthesis_cluster_and_emit() {
     .unwrap();
     assert!(replayed2, "second emission of same cluster should be idempotent replay");
 }
+
+// ---- synthesis contradiction + supersession --------------------------
+
+struct ContradictionFixtureLlm {
+    existing_claim: String,
+}
+
+impl Llm for ContradictionFixtureLlm {
+    async fn complete(&self, system: &str, user: &str) -> chitta::error::Result<String> {
+        if system.contains("extract consolidated claims") {
+            Ok(
+                r#"[{"memory_type": "preference", "claim": "Josh prefers spaces over tabs"}]"#
+                    .into(),
+            )
+        } else if system.contains("group candidate claims") {
+            let count = user.lines().filter(|l| l.starts_with('[')).count();
+            let indices: Vec<usize> = (0..count).collect();
+            let indices_json = serde_json::to_string(&indices).unwrap();
+            Ok(format!(
+                r#"[{{"representative_claim": "Josh prefers spaces over tabs", "memory_type": "preference", "member_indices": {indices_json}}}]"#
+            ))
+        } else if system.contains("detect contradictions") {
+            if user.contains(&self.existing_claim) {
+                Ok(r#"{"contradicts_index": 0, "shift": "switched from tabs to spaces"}"#.into())
+            } else {
+                Ok(r#"{"contradicts_index": null}"#.into())
+            }
+        } else {
+            Ok(r#"{"contradicts_index": null}"#.into())
+        }
+    }
+}
+
+#[tokio::test]
+async fn synthesis_contradiction_and_supersession() {
+    let h = require_harness!("synth_contradict");
+
+    // 1. Seed an existing consolidated memory: "Josh prefers tabs over spaces"
+    let old_out = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh prefers tabs over spaces".into(),
+            idempotency_key: "old-consolidated".into(),
+            event_time: None,
+            tags: Some(vec!["reflect".into(), "synthesised".into()]),
+            metadata: None,
+            memory_type: Some("preference".into()),
+            external_refs: None,
+            facets: Facets::default(),
+            confidence: Some(0.75),
+            source: Some("reflect".into()),
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+    let old_id = old_out.id;
+
+    // 2. Seed 6 contradicting observations across multiple days
+    let base_time = Utc::now() - Duration::days(30);
+    let mut stored_ids = Vec::new();
+
+    for i in 0..6 {
+        let day_offset = Duration::days(i * 3);
+        let out = tools::store::handle(
+            &h.pool,
+            h.embedder.clone(),
+            StoreArgs {
+                profile: h.profile.clone(),
+                content: format!("Josh prefers spaces over tabs — observation {i}"),
+                idempotency_key: format!("contradict-obs-{i}"),
+                event_time: Some(base_time + day_offset),
+                tags: None,
+                metadata: None,
+                memory_type: Some("observation".into()),
+                external_refs: None,
+                facets: Facets::default(),
+                confidence: None,
+                source: None,
+                derivations: None,
+            },
+        )
+        .await
+        .unwrap();
+        stored_ids.push(out.id);
+    }
+
+    // Backdate record_time so rows span multiple days
+    for (i, id) in stored_ids.iter().enumerate() {
+        let record_time = base_time + Duration::days(i as i64 * 3);
+        sqlx::query("UPDATE memories SET record_time = $1 WHERE id = $2")
+            .bind(record_time)
+            .bind(id)
+            .execute(&h.pool)
+            .await
+            .unwrap();
+    }
+
+    // 3. Fetch raw rows and run the full synthesis pipeline
+    let rows: Vec<db::MemoryRow> = {
+        let mut v = Vec::new();
+        for id in &stored_ids {
+            v.push(
+                db::get_memory_by_id(&h.pool, &h.profile, *id)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+        }
+        v
+    };
+
+    let llm = ContradictionFixtureLlm {
+        existing_claim: "Josh prefers tabs over spaces".into(),
+    };
+
+    let result = synthesis::run_synthesis(
+        &h.pool,
+        &h.embedder,
+        &llm,
+        &h.profile,
+        &rows,
+        Utc::now(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.clusters_emitted, 1);
+    assert_eq!(result.supersessions, 1);
+
+    // 4. Verify the old memory is now superseded
+    let old_row = db::get_memory_by_id(&h.pool, &h.profile, old_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        old_row.superseded_by.is_some(),
+        "old memory should be superseded"
+    );
+
+    let new_id = old_row.superseded_by.unwrap();
+
+    // 5. Verify the new consolidated row exists
+    let new_row = db::get_memory_by_id(&h.pool, &h.profile, new_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(new_row.memory_type, "preference");
+    assert!(new_row.content.contains("spaces"));
+    assert_eq!(new_row.source.as_deref(), Some("reflect"));
+
+    // 6. Verify meta-observation (mental_model) was written
+    let all_rows = db::list_recent(&h.pool, &h.profile, 50, &[], &["mental_model".into()])
+        .await
+        .unwrap();
+    let meta = all_rows
+        .iter()
+        .find(|r| r.tags.contains(&"supersession".to_string()))
+        .expect("meta-observation should exist");
+    assert_eq!(meta.memory_type, "mental_model");
+    assert!(meta.content.contains("tabs"));
+    assert!(meta.content.contains("spaces"));
+
+    // 7. Verify meta-observation has derivations linking old and new
+    let meta_derivations = db::get_derivations_for(&h.pool, meta.id).await.unwrap();
+    assert_eq!(meta_derivations.len(), 2, "meta should have 2 derivations");
+    let deriv_types: Vec<&str> = meta_derivations.iter().map(|d| d.derivation_type.as_str()).collect();
+    assert!(deriv_types.contains(&"supersession_of"));
+    assert!(deriv_types.contains(&"supersession_to"));
+}
+
+// ---- synthesis: disagree-flagged memory superseded --------------------
+
+struct DisagreeFixtureLlm {
+    target_claim: String,
+}
+
+impl Llm for DisagreeFixtureLlm {
+    async fn complete(&self, system: &str, user: &str) -> chitta::error::Result<String> {
+        if system.contains("extract consolidated claims") {
+            if user.contains("correction") || user.contains("actually prefers") {
+                Ok(
+                    r#"[{"memory_type": "preference", "claim": "Josh prefers dark mode"}]"#
+                        .into(),
+                )
+            } else {
+                Ok("[]".into())
+            }
+        } else if system.contains("group candidate claims") {
+            let count = user.lines().filter(|l| l.starts_with('[')).count();
+            let indices: Vec<usize> = (0..count).collect();
+            let indices_json = serde_json::to_string(&indices).unwrap();
+            Ok(format!(
+                r#"[{{"representative_claim": "Josh prefers dark mode", "memory_type": "preference", "member_indices": {indices_json}}}]"#
+            ))
+        } else if system.contains("detect contradictions") {
+            if user.contains(&self.target_claim) {
+                Ok(
+                    r#"{"contradicts_index": 0, "shift": "switched from light mode to dark mode"}"#
+                        .into(),
+                )
+            } else {
+                Ok(r#"{"contradicts_index": null}"#.into())
+            }
+        } else {
+            Ok(r#"{"contradicts_index": null}"#.into())
+        }
+    }
+}
+
+#[tokio::test]
+async fn synthesis_disagree_flagged_supersession() {
+    let h = require_harness!("synth_disagree");
+
+    // 1. Seed a consolidated memory that will be disagreed with
+    let old_out = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh prefers light mode".into(),
+            idempotency_key: "old-light-mode".into(),
+            event_time: None,
+            tags: Some(vec!["reflect".into(), "synthesised".into()]),
+            metadata: None,
+            memory_type: Some("preference".into()),
+            external_refs: None,
+            facets: Facets::default(),
+            confidence: Some(0.75),
+            source: Some("reflect".into()),
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+    let old_id = old_out.id;
+
+    // 2. Record disagree feedback (creates feedback + correction rows)
+    let _feedback = tools::record_feedback::handle(
+        &h.pool,
+        h.embedder.clone(),
+        RecordFeedbackArgs {
+            profile: h.profile.clone(),
+            memory_id: old_id.to_string(),
+            kind: FeedbackKind::Disagree,
+            correction: Some("Josh actually prefers dark mode now".into()),
+        },
+    )
+    .await
+    .unwrap();
+
+    // 3. Seed additional observations that support the correction
+    let base_time = Utc::now() - Duration::days(30);
+    let mut stored_ids = Vec::new();
+
+    for i in 0..5 {
+        let day_offset = Duration::days(i * 4);
+        let out = tools::store::handle(
+            &h.pool,
+            h.embedder.clone(),
+            StoreArgs {
+                profile: h.profile.clone(),
+                content: format!("Josh actually prefers dark mode — observation {i}"),
+                idempotency_key: format!("disagree-obs-{i}"),
+                event_time: Some(base_time + day_offset),
+                tags: None,
+                metadata: None,
+                memory_type: Some("observation".into()),
+                external_refs: None,
+                facets: Facets::default(),
+                confidence: None,
+                source: None,
+                derivations: None,
+            },
+        )
+        .await
+        .unwrap();
+        stored_ids.push(out.id);
+    }
+
+    for (i, id) in stored_ids.iter().enumerate() {
+        let record_time = base_time + Duration::days(i as i64 * 4);
+        sqlx::query("UPDATE memories SET record_time = $1 WHERE id = $2")
+            .bind(record_time)
+            .bind(id)
+            .execute(&h.pool)
+            .await
+            .unwrap();
+    }
+
+    // 4. Fetch all raw rows since epoch (includes feedback + correction + observations)
+    let rows = db::fetch_raw_since(&h.pool, &h.profile, None).await.unwrap();
+
+    // Verify disagree targets are found
+    let targets = synthesis::find_disagree_targets(&rows);
+    assert!(
+        targets.contains(&old_id),
+        "disagree target should include the old memory"
+    );
+
+    // 5. Run full synthesis pipeline
+    let llm = DisagreeFixtureLlm {
+        target_claim: "Josh prefers light mode".into(),
+    };
+
+    let result = synthesis::run_synthesis(
+        &h.pool,
+        &h.embedder,
+        &llm,
+        &h.profile,
+        &rows,
+        Utc::now(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.supersessions, 1, "should supersede the disagreed-with memory");
+
+    // 6. Verify the old memory is superseded
+    let old_row = db::get_memory_by_id(&h.pool, &h.profile, old_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        old_row.superseded_by.is_some(),
+        "disagree-targeted memory should be superseded"
+    );
+
+    // 7. Verify meta-observation written
+    let all_mental_models =
+        db::list_recent(&h.pool, &h.profile, 50, &[], &["mental_model".into()])
+            .await
+            .unwrap();
+    let meta = all_mental_models
+        .iter()
+        .find(|r| r.tags.contains(&"supersession".to_string()));
+    assert!(meta.is_some(), "meta-observation should be written for disagree supersession");
+}
