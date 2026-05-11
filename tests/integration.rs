@@ -30,8 +30,8 @@ use chitta::embedding::Embedder;
 use chitta::error::ChittaError;
 use chitta::facets::Facets;
 use chitta::tools::{
-    self, AppliesTo, DeleteArgs, GetArgs, GetProfileArgs, ListArgs, ReflectStatusArgs, SearchArgs,
-    StoreArgs, SupersedeArgs, UpdateArgs,
+    self, AppliesTo, DeleteArgs, FeedbackKind, GetArgs, GetProfileArgs, ListArgs,
+    RecordFeedbackArgs, ReflectStatusArgs, SearchArgs, StoreArgs, SupersedeArgs, UpdateArgs,
 };
 use sqlx::PgPool;
 use tokio::sync::OnceCell;
@@ -3184,4 +3184,350 @@ async fn reflect_status_empty_profile() {
     assert!(result.since.is_none());
     assert!(result.date_range.is_none());
     assert!(result.disagree_flagged.is_empty());
+}
+
+// ---- record_feedback ------------------------------------------------
+
+async fn seed_consolidated(h: &Harness, key: &str, confidence: f32) -> uuid::Uuid {
+    let out = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: format!("consolidated entry for {key}"),
+            idempotency_key: key.into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("trait".into()),
+            external_refs: None,
+            facets: Facets::default(),
+            confidence: Some(confidence),
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+    out.id
+}
+
+#[tokio::test]
+async fn feedback_agree_bumps_confidence_and_reinforcement() {
+    let h = require_harness!("fb_agree");
+    let id = seed_consolidated(&h, "fb-agree-1", 0.50).await;
+
+    let result = tools::record_feedback::handle(
+        &h.pool,
+        h.embedder.clone(),
+        RecordFeedbackArgs {
+            profile: h.profile.clone(),
+            memory_id: id.to_string(),
+            kind: FeedbackKind::Agree,
+            correction: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.memory_id, id);
+    assert!((result.new_confidence - 0.55).abs() < 0.001);
+    assert!(matches!(result.kind, FeedbackKind::Agree));
+    assert!(result.correction_row_id.is_none());
+
+    let row = db::get_memory_by_id(&h.pool, &h.profile, id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!((row.confidence.unwrap() - 0.55).abs() < 0.001);
+    assert_eq!(row.reinforcement_count, 1);
+    assert!(row.last_reinforced_at.is_some());
+
+    let feedback = db::get_memory_by_id(&h.pool, &h.profile, result.feedback_row_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(feedback.memory_type, "observation");
+    assert!(feedback.tags.contains(&"feedback".to_string()));
+    assert!(feedback.tags.contains(&"agree".to_string()));
+}
+
+#[tokio::test]
+async fn feedback_disagree_drops_confidence() {
+    let h = require_harness!("fb_disagree");
+    let id = seed_consolidated(&h, "fb-disagree-1", 0.50).await;
+
+    let result = tools::record_feedback::handle(
+        &h.pool,
+        h.embedder.clone(),
+        RecordFeedbackArgs {
+            profile: h.profile.clone(),
+            memory_id: id.to_string(),
+            kind: FeedbackKind::Disagree,
+            correction: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!((result.new_confidence - 0.40).abs() < 0.001);
+    assert!(result.correction_row_id.is_none());
+
+    let row = db::get_memory_by_id(&h.pool, &h.profile, id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!((row.confidence.unwrap() - 0.40).abs() < 0.001);
+    assert_eq!(row.reinforcement_count, 0, "disagree should not increment reinforcement_count");
+    assert!(row.last_reinforced_at.is_some());
+}
+
+#[tokio::test]
+async fn feedback_disagree_with_correction_writes_both_rows() {
+    let h = require_harness!("fb_correction");
+    let id = seed_consolidated(&h, "fb-correction-1", 0.70).await;
+
+    let result = tools::record_feedback::handle(
+        &h.pool,
+        h.embedder.clone(),
+        RecordFeedbackArgs {
+            profile: h.profile.clone(),
+            memory_id: id.to_string(),
+            kind: FeedbackKind::Disagree,
+            correction: Some("Actually Josh prefers Vim over Emacs".into()),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!((result.new_confidence - 0.60).abs() < 0.001);
+    assert!(result.correction_row_id.is_some());
+
+    let correction = db::get_memory_by_id(
+        &h.pool,
+        &h.profile,
+        result.correction_row_id.unwrap(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(correction.memory_type, "observation");
+    assert!(correction.tags.contains(&"correction".to_string()));
+    assert!(
+        correction.tags.iter().any(|t| t.starts_with("contradicts:")),
+        "correction should have contradicts:<id> tag"
+    );
+    assert_eq!(correction.content, "Actually Josh prefers Vim over Emacs");
+    assert!(correction.embedding.is_some(), "correction should be embedded");
+}
+
+#[tokio::test]
+async fn feedback_rejects_raw_layer_memory() {
+    let h = require_harness!("fb_reject_raw");
+
+    let out = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "raw observation".into(),
+            idempotency_key: "fb-raw-1".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("observation".into()),
+            external_refs: None,
+            facets: Facets::default(),
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let err = tools::record_feedback::handle(
+        &h.pool,
+        h.embedder.clone(),
+        RecordFeedbackArgs {
+            profile: h.profile.clone(),
+            memory_id: out.id.to_string(),
+            kind: FeedbackKind::Agree,
+            correction: None,
+        },
+    )
+    .await
+    .unwrap_err();
+
+    match err {
+        ChittaError::InvalidArgument { argument, .. } => {
+            assert_eq!(argument, "memory_id");
+        }
+        other => panic!("expected InvalidArgument, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn feedback_rejects_superseded_memory() {
+    let h = require_harness!("fb_reject_superseded");
+    let old_id = seed_consolidated(&h, "fb-sup-old", 0.50).await;
+    let new_id = seed_consolidated(&h, "fb-sup-new", 0.60).await;
+
+    tools::supersede::handle(
+        &h.pool,
+        SupersedeArgs {
+            profile: h.profile.clone(),
+            old_id: old_id.to_string(),
+            new_id: new_id.to_string(),
+            reason: "test supersede".into(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let err = tools::record_feedback::handle(
+        &h.pool,
+        h.embedder.clone(),
+        RecordFeedbackArgs {
+            profile: h.profile.clone(),
+            memory_id: old_id.to_string(),
+            kind: FeedbackKind::Agree,
+            correction: None,
+        },
+    )
+    .await
+    .unwrap_err();
+
+    match err {
+        ChittaError::InvalidArgument { argument, .. } => {
+            assert_eq!(argument, "memory_id");
+        }
+        other => panic!("expected InvalidArgument for superseded, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn feedback_rejects_invalidated_memory() {
+    let h = require_harness!("fb_reject_invalid");
+    let id = seed_consolidated(&h, "fb-inv-1", 0.50).await;
+
+    tools::delete::handle(
+        &h.pool,
+        DeleteArgs {
+            profile: h.profile.clone(),
+            id: id.to_string(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let err = tools::record_feedback::handle(
+        &h.pool,
+        h.embedder.clone(),
+        RecordFeedbackArgs {
+            profile: h.profile.clone(),
+            memory_id: id.to_string(),
+            kind: FeedbackKind::Agree,
+            correction: None,
+        },
+    )
+    .await
+    .unwrap_err();
+
+    match err {
+        ChittaError::NotFound { .. } => {}
+        other => panic!("expected NotFound for deleted memory, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn feedback_agree_caps_at_one() {
+    let h = require_harness!("fb_cap");
+    let id = seed_consolidated(&h, "fb-cap-1", 0.98).await;
+
+    let result = tools::record_feedback::handle(
+        &h.pool,
+        h.embedder.clone(),
+        RecordFeedbackArgs {
+            profile: h.profile.clone(),
+            memory_id: id.to_string(),
+            kind: FeedbackKind::Agree,
+            correction: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!((result.new_confidence - 1.0).abs() < 0.001);
+}
+
+#[tokio::test]
+async fn feedback_disagree_floors_at_zero() {
+    let h = require_harness!("fb_floor");
+    let id = seed_consolidated(&h, "fb-floor-1", 0.05).await;
+
+    let result = tools::record_feedback::handle(
+        &h.pool,
+        h.embedder.clone(),
+        RecordFeedbackArgs {
+            profile: h.profile.clone(),
+            memory_id: id.to_string(),
+            kind: FeedbackKind::Disagree,
+            correction: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!((result.new_confidence - 0.0).abs() < 0.001);
+}
+
+#[tokio::test]
+async fn feedback_agree_with_correction_rejected() {
+    let h = require_harness!("fb_agree_correction");
+    let id = seed_consolidated(&h, "fb-agree-corr", 0.50).await;
+
+    let err = tools::record_feedback::handle(
+        &h.pool,
+        h.embedder.clone(),
+        RecordFeedbackArgs {
+            profile: h.profile.clone(),
+            memory_id: id.to_string(),
+            kind: FeedbackKind::Agree,
+            correction: Some("this should be rejected".into()),
+        },
+    )
+    .await
+    .unwrap_err();
+
+    match err {
+        ChittaError::InvalidArgument { argument, .. } => {
+            assert_eq!(argument, "correction");
+        }
+        other => panic!("expected InvalidArgument for correction+agree, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn feedback_wrong_profile_returns_not_found() {
+    let h = require_harness!("fb_wrong_profile");
+    let id = seed_consolidated(&h, "fb-wrongp", 0.50).await;
+
+    let err = tools::record_feedback::handle(
+        &h.pool,
+        h.embedder.clone(),
+        RecordFeedbackArgs {
+            profile: "nonexistent-profile".into(),
+            memory_id: id.to_string(),
+            kind: FeedbackKind::Agree,
+            correction: None,
+        },
+    )
+    .await
+    .unwrap_err();
+
+    match err {
+        ChittaError::NotFound { .. } => {}
+        other => panic!("expected NotFound for wrong profile, got: {other:?}"),
+    }
 }

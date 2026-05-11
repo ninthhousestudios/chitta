@@ -883,6 +883,36 @@ pub async fn fetch_raw_since(
     Ok(rows)
 }
 
+// ── feedback ───────────────────────────────────────────────────────
+
+pub async fn apply_feedback(
+    pool: &PgPool,
+    profile: &str,
+    id: Uuid,
+    new_confidence: f32,
+    new_reinforcement_count: i32,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        UPDATE memories
+        SET confidence          = $3,
+            reinforcement_count = $4,
+            last_reinforced_at  = $5
+        WHERE profile = $1 AND id = $2
+          AND invalidated_at IS NULL
+        "#,
+    )
+    .bind(profile)
+    .bind(id)
+    .bind(new_confidence)
+    .bind(new_reinforcement_count)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 // ── profile candidates ─────────────────────────────────────────────
 
 /// Over-fetch the top-100 active consolidated rows for tier-0 profile,

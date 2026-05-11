@@ -204,6 +204,25 @@ impl ChittaServer {
         serde_json::to_string_pretty(&out).map_err(json_to_rmcp)
     }
 
+    /// Record feedback (agree/disagree) on a consolidated memory.
+    #[tool(
+        description = "Record feedback on a consolidated memory (trait, value, \
+                          pattern, preference, mental_model). kind=agree bumps \
+                          confidence +0.05 (cap 1.0) and increments reinforcement_count. \
+                          kind=disagree drops confidence −0.10 (floor 0.0). Optional \
+                          correction text (disagree only) writes a separate observation \
+                          tagged contradicts:<memory_id> for /reflect to pick up."
+    )]
+    pub async fn record_feedback(
+        &self,
+        Parameters(args): Parameters<tools::RecordFeedbackArgs>,
+    ) -> Result<String, ErrorData> {
+        let out = tools::record_feedback::handle(&self.pool, self.embedder.clone(), args)
+            .await
+            .map_err(chitta_to_rmcp)?;
+        serde_json::to_string_pretty(&out).map_err(json_to_rmcp)
+    }
+
     /// Health check — verifies DB connectivity and embedder responsiveness.
     #[tool(
         description = "Health check. Verifies DB connectivity and ONNX embedder \
@@ -227,9 +246,10 @@ impl ServerHandler for ChittaServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "chitta v0.3.0 — working model of Josh. \
-                 Ten tools: store_memory, get_memory, search_memories, \
+                 Eleven tools: store_memory, get_memory, search_memories, \
                  update_memory, delete_memory, list_recent_memories, \
-                 supersede_memory, get_profile, reflect_status, health_check. \
+                 supersede_memory, get_profile, record_feedback, reflect_status, \
+                 health_check. \
                  Profiles isolate namespaces; idempotency_key dedupes writes; \
                  bi-temporal (event_time + record_time); verbatim storage.",
         )

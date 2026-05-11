@@ -9,9 +9,10 @@ use chitta::envelope::Envelope;
 use chitta::error::{ChittaError, codes};
 use chitta::facets::Facets;
 use chitta::tools::{
-    DeleteArgs, DeleteOutput, DerivationInput, GetArgs, GetOutput, GetProfileArgs,
-    GetProfileOutput, ListArgs, ListItem, ListOutput, ReflectStatusArgs, SearchArgs, SearchHit,
-    SearchOutput, StoreArgs, StoreOutput, SupersedeArgs, SupersedeOutput, UpdateArgs, UpdateOutput,
+    DeleteArgs, DeleteOutput, DerivationInput, FeedbackKind, GetArgs, GetOutput, GetProfileArgs,
+    GetProfileOutput, ListArgs, ListItem, ListOutput, RecordFeedbackArgs, RecordFeedbackOutput,
+    ReflectStatusArgs, SearchArgs, SearchHit, SearchOutput, StoreArgs, StoreOutput, SupersedeArgs,
+    SupersedeOutput, UpdateArgs, UpdateOutput,
 };
 use serde_json::{Value, json};
 
@@ -915,4 +916,75 @@ fn search_args_rejects_old_exclude_retired_field() {
     let v = json!({"profile": "josh", "query": "q", "exclude_retired": false});
     let args: SearchArgs = serde_json::from_value(v).unwrap();
     assert!(args.exclude_superseded.is_none());
+}
+
+// ---- record_feedback wire contract ------------------------------------
+
+#[test]
+fn record_feedback_args_agree_minimum() {
+    let v = json!({
+        "profile": "josh",
+        "memory_id": "019e0000-0000-7000-0000-000000000001",
+        "kind": "agree",
+    });
+    let args: RecordFeedbackArgs = serde_json::from_value(v).unwrap();
+    assert_eq!(args.profile, "josh");
+    assert!(matches!(args.kind, FeedbackKind::Agree));
+    assert!(args.correction.is_none());
+}
+
+#[test]
+fn record_feedback_args_disagree_with_correction() {
+    let v = json!({
+        "profile": "josh",
+        "memory_id": "019e0000-0000-7000-0000-000000000001",
+        "kind": "disagree",
+        "correction": "Actually Josh prefers Vim over Emacs",
+    });
+    let args: RecordFeedbackArgs = serde_json::from_value(v).unwrap();
+    assert!(matches!(args.kind, FeedbackKind::Disagree));
+    assert_eq!(
+        args.correction.as_deref(),
+        Some("Actually Josh prefers Vim over Emacs")
+    );
+}
+
+#[test]
+fn record_feedback_output_serializes_without_correction() {
+    let out = RecordFeedbackOutput {
+        memory_id: uuid::Uuid::nil(),
+        new_confidence: 0.55,
+        kind: FeedbackKind::Agree,
+        feedback_row_id: uuid::Uuid::nil(),
+        correction_row_id: None,
+    };
+    let wire: Value = serde_json::to_value(&out).unwrap();
+    assert_keys(&wire, &["memory_id", "new_confidence", "kind", "feedback_row_id"]);
+    assert!(wire.get("correction_row_id").is_none());
+}
+
+#[test]
+fn record_feedback_output_serializes_with_correction() {
+    let out = RecordFeedbackOutput {
+        memory_id: uuid::Uuid::nil(),
+        new_confidence: 0.40,
+        kind: FeedbackKind::Disagree,
+        feedback_row_id: uuid::Uuid::nil(),
+        correction_row_id: Some(uuid::Uuid::nil()),
+    };
+    let wire: Value = serde_json::to_value(&out).unwrap();
+    assert_keys(
+        &wire,
+        &["memory_id", "new_confidence", "kind", "feedback_row_id", "correction_row_id"],
+    );
+}
+
+#[test]
+fn record_feedback_args_rejects_invalid_kind() {
+    let v = json!({
+        "profile": "josh",
+        "memory_id": "019e0000-0000-7000-0000-000000000001",
+        "kind": "neutral",
+    });
+    assert!(serde_json::from_value::<RecordFeedbackArgs>(v).is_err());
 }
