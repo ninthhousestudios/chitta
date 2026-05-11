@@ -1,12 +1,54 @@
 # chitta
 
-Agent-native persistent memory server, speaking MCP over stdio or
-Streamable HTTP. Postgres + pgvector backend, BGE-M3 ONNX embedder,
-seven tools, verbatim storage, bi-temporal rows, typed memories,
-idempotent writes, actionable errors.
+[![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 
-See [`docs/principles.md`](docs/principles.md) for the contract this server
-upholds.
+Chitta is the working model of the human in an AI-assisted workflow. It
+stores and retrieves what the person values, how they think, what patterns
+they follow, and what preferences they hold — so that every agent session
+starts grounded in who it's working with, not just what it's working on.
+
+The Sanskrit *citta* (चित्त) means the field of impressions that conditions
+future thought and behavior. That's the role this subsystem plays: it
+accumulates observations across sessions, synthesizes them into stable
+traits and preferences, and surfaces them automatically so agents act
+consistently with the human they serve.
+
+Part of [manas](https://github.com/ninthhousestudios/manas), a modular agent
+infrastructure built in Rust.
+
+## What chitta is (and isn't)
+
+Chitta is **not** a general-purpose memory store. Other manas subsystems
+handle project tasks (yojana), code intelligence (sutra), file indexing
+(smriti), and document retrieval (kosha). Chitta holds only content that
+models the person — observations about their corrections, decisions that
+reveal their values, patterns in how they work.
+
+A memory belongs in chitta if it would help an agent act more like a
+trusted colleague who knows the human well. If it's about a codebase or a
+task, it belongs somewhere else.
+
+## Design
+
+Memories live in three layers:
+
+- **Raw / episodic** — observations, episodes, and decisions captured
+  during sessions. Append-only, immutable.
+- **Consolidated / semantic** — traits, values, patterns, preferences,
+  and mental models synthesized from raw material. Confidence-weighted,
+  supersedeable (old versions are kept, not deleted).
+- **Profile / always-on** — the top ~30 consolidated entries by effective
+  score, loaded at session start without any query. This is what makes the
+  working model actually work: agents get the most important facts about
+  the human before they do anything else.
+
+Retrieval has three tiers: the always-on profile (no query needed),
+context-faceted SQL filtering (by domain, skill, project, situation), and
+hybrid dense+sparse semantic search for everything else.
+
+See [`docs/principles.md`](docs/principles.md) for the invariants this
+server upholds — verbatim storage, bi-temporal rows, write-fast/enrich-lazy,
+agent-native wire contract.
 
 ## Prerequisites
 
@@ -107,19 +149,47 @@ RestartSec=3
 WantedBy=default.target
 ```
 
+## Status
+
+Chitta is running in production and being actively redesigned. The current
+server (v0.3) works — it stores memories, embeds them, and retrieves them
+via hybrid search. But it was built as a generic memory store and is being
+narrowed to its actual job: modelling the human.
+
+What's landed:
+- Core store/search/update tools with bi-temporal rows
+- Dense (BGE-M3 1024-dim) + sparse vector retrieval with RRF
+- `get_profile` for always-on session grounding
+- `supersede_memory` for first-class trait evolution
+- Memory types: `observation`, `episode`, `decision`, `trait`, `value`,
+  `pattern`, `preference`, `mental_model`
+- `applies_to` facets (domains, skills, projects, situations) for
+  context-scoped retrieval
+- Query logging for retrieval regression detection
+
+What's in progress:
+- Schema migration to enforce the three-layer taxonomy
+- Gold-set evaluation (~50 hand-authored retrieval test cases)
+- `/reflect` rewrite for automated synthesis (raw -> consolidated)
+- `/agree` and `/disagree` feedback loops for reinforcement
+
+See [`docs/working-model-pivot.md`](docs/working-model-pivot.md) for the
+full design direction.
+
 ## Tools
 
 | Tool | Purpose |
 |---|---|
-| `store_memory` | Persist verbatim content with optional `event_time`, `tags`, `memory_type`, `metadata`. Idempotent on `(profile, idempotency_key)`. |
-| `get_memory` | Fetch one memory by profile + UUID. |
-| `search_memories` | Semantic search with tag/type filters, similarity floor, and token-budget truncation. |
+| `store_memory` | Persist verbatim content. Idempotent on `(profile, idempotency_key)`. |
+| `get_memory` | Fetch one memory by profile + id (prefix match). |
+| `search_memories` | Hybrid dense+sparse semantic search with facet filters. |
+| `get_profile` | Load the always-on working model (~30 top entries, no query). |
+| `supersede_memory` | Replace a consolidated memory, preserving the old version. |
 | `update_memory` | Update content, tags, type, or metadata. Re-embeds on content change. |
-| `delete_memory` | Hard-delete by profile + id. |
-| `list_recent_memories` | List by `record_time` DESC with tag/type filters. |
+| `delete_memory` | Hard-delete (for genuine mistakes; prefer supersession). |
+| `list_recent_memories` | List by recency with tag/type filters. |
+| `reflect_status` | Check synthesis pipeline health. |
 | `health_check` | Verify DB connectivity and embedder responsiveness. |
-
-Memory types: `memory`, `observation`, `decision`, `session_summary`, `mental_model`.
 
 ## Testing
 
@@ -148,6 +218,21 @@ Tests without `TEST_DATABASE_URL` set (or with the model missing) print a
 ```bash
 cargo clippy --all-targets -- -D warnings
 ```
+
+## Architecture
+
+Chitta is a Rust binary (~6k LOC) that speaks
+[MCP](https://modelcontextprotocol.io) over stdio or Streamable HTTP.
+
+- **Storage:** Postgres 16+ with pgvector. Bi-temporal rows, typed
+  memories, idempotent writes.
+- **Embedding:** BGE-M3 via ONNX Runtime, in-process. Produces both dense
+  (1024-dim) and sparse vectors per memory. No external API calls on the
+  write path.
+- **Retrieval:** Reciprocal Rank Fusion over dense and sparse results,
+  with optional facet filtering. Token-budget-aware truncation.
+- **Transport:** Stdio (for direct MCP client use) or HTTP with
+  bearer-token auth (for systemd service deployment).
 
 ## CLI subcommands
 

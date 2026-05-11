@@ -15,3 +15,4 @@ bench/astrobench/hapax-candidates.txt
 bench/datasets/astrobench/snapshot-*.dump
 .sutra/
 .codex
+scripts/migrate/
