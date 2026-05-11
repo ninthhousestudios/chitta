@@ -29,6 +29,7 @@ use chitta::db;
 use chitta::embedding::Embedder;
 use chitta::error::ChittaError;
 use chitta::facets::Facets;
+use chitta::synthesis::{self, Llm};
 use chitta::tools::{
     self, AppliesTo, DeleteArgs, FeedbackKind, GetArgs, GetProfileArgs, ListArgs,
     RecordFeedbackArgs, ReflectStatusArgs, SearchArgs, StoreArgs, SupersedeArgs, UpdateArgs,
@@ -3530,4 +3531,113 @@ async fn feedback_wrong_profile_returns_not_found() {
         ChittaError::NotFound { .. } => {}
         other => panic!("expected NotFound for wrong profile, got: {other:?}"),
     }
+}
+
+// ---- synthesis smoke ------------------------------------------------
+
+struct FixtureLlm;
+
+impl Llm for FixtureLlm {
+    async fn complete(&self, _system: &str, user: &str) -> chitta::error::Result<String> {
+        if user.contains("prefers Rust") {
+            Ok(r#"[{"memory_type": "preference", "claim": "Josh prefers Rust"}]"#.into())
+        } else if user.contains("values simplicity") {
+            Ok(r#"[
+                {"memory_type": "value", "claim": "Josh values simplicity"},
+                {"memory_type": "pattern", "claim": "Josh avoids premature abstraction"}
+            ]"#
+            .into())
+        } else {
+            Ok("[]".into())
+        }
+    }
+}
+
+#[tokio::test]
+async fn synthesis_extract_candidates_smoke() {
+    let h = require_harness!("synth_smoke");
+
+    let out1 = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh prefers Rust for systems work".into(),
+            idempotency_key: "synth-1".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("observation".into()),
+            external_refs: None,
+            facets: Facets::default(),
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let out2 = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh values simplicity over cleverness".into(),
+            idempotency_key: "synth-2".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("observation".into()),
+            external_refs: None,
+            facets: Facets::default(),
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let out3 = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "routine standup notes, nothing extractable".into(),
+            idempotency_key: "synth-3".into(),
+            event_time: None,
+            tags: None,
+            metadata: None,
+            memory_type: Some("observation".into()),
+            external_refs: None,
+            facets: Facets::default(),
+            confidence: None,
+            source: None,
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let rows = vec![
+        db::get_memory_by_id(&h.pool, &h.profile, out1.id).await.unwrap().unwrap(),
+        db::get_memory_by_id(&h.pool, &h.profile, out2.id).await.unwrap().unwrap(),
+        db::get_memory_by_id(&h.pool, &h.profile, out3.id).await.unwrap().unwrap(),
+    ];
+
+    let llm = FixtureLlm;
+    let candidates = synthesis::extract_candidates(&llm, &rows).await.unwrap();
+
+    assert_eq!(candidates.len(), 3, "expected 3 candidates from 2 productive rows");
+
+    assert_eq!(candidates[0].memory_type, "preference");
+    assert_eq!(candidates[0].claim, "Josh prefers Rust");
+    assert_eq!(candidates[0].source_id, out1.id);
+
+    assert_eq!(candidates[1].memory_type, "value");
+    assert_eq!(candidates[1].source_id, out2.id);
+
+    assert_eq!(candidates[2].memory_type, "pattern");
+    assert_eq!(candidates[2].source_id, out2.id);
 }
