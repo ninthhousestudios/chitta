@@ -88,6 +88,7 @@ working directory is also loaded as a fallback.
 | `CHITTA_HTTP_ADDR` | `127.0.0.1` | HTTP listen address (with `--http`). |
 | `CHITTA_HTTP_PORT` | `3100` | HTTP listen port (with `--http`). |
 | `ORT_DYLIB_PATH` | *(loader default)* | Path to `libonnxruntime.so`. |
+| `ANTHROPIC_API_KEY` | *(unset)* | Required only for `chitta reflect --api-key` builds. |
 
 See [`.env.example`](.env.example) for the full list including pool tuning
 and retrieval scoring knobs.
@@ -161,6 +162,11 @@ What's landed:
 - Dense (BGE-M3 1024-dim) + sparse vector retrieval with RRF
 - `get_profile` for always-on session grounding
 - `supersede_memory` for first-class trait evolution
+- `record_feedback` plus Claude `/agree` and `/disagree` commands for
+  reinforcing or challenging the working model
+- `reflect_status` for checking what raw evidence is waiting to be
+  synthesized
+- `chitta reflect` for automated raw -> consolidated synthesis
 - Memory types: `observation`, `episode`, `decision`, `trait`, `value`,
   `pattern`, `preference`, `mental_model`
 - `applies_to` facets (domains, skills, projects, situations) for
@@ -170,8 +176,6 @@ What's landed:
 What's in progress:
 - Schema migration to enforce the three-layer taxonomy
 - Gold-set evaluation (~50 hand-authored retrieval test cases)
-- `/reflect` rewrite for automated synthesis (raw -> consolidated)
-- `/agree` and `/disagree` feedback loops for reinforcement
 
 See [`docs/working-model-pivot.md`](docs/working-model-pivot.md) for the
 full design direction.
@@ -185,11 +189,166 @@ full design direction.
 | `search_memories` | Hybrid dense+sparse semantic search with facet filters. |
 | `get_profile` | Load the always-on working model (~30 top entries, no query). |
 | `supersede_memory` | Replace a consolidated memory, preserving the old version. |
+| `record_feedback` | Agree/disagree with a consolidated memory; used by `/agree` and `/disagree`. |
 | `update_memory` | Update content, tags, type, or metadata. Re-embeds on content change. |
 | `delete_memory` | Hard-delete (for genuine mistakes; prefer supersession). |
 | `list_recent_memories` | List by recency with tag/type filters. |
 | `reflect_status` | Check synthesis pipeline health. |
 | `health_check` | Verify DB connectivity and embedder responsiveness. |
+
+## Human workflow
+
+Chitta is mostly agent-facing, but the working model needs human feedback.
+The loop is:
+
+1. Review the current working model in a Claude session.
+2. Use `/agree` when a consolidated memory is still true.
+3. Use `/disagree` when a consolidated memory is wrong, stale, or missing
+   important nuance.
+4. Run `chitta reflect` periodically to synthesize new raw evidence into
+   consolidated memories.
+
+### Review the working model
+
+At the start of a session, ask Claude to load the profile:
+
+```text
+Use chitta get_profile for profile josh and show me the working model.
+```
+
+`get_profile` returns the active consolidated memories that currently matter
+most. These are the memories that `/agree` and `/disagree` are meant to target:
+`trait`, `value`, `pattern`, `preference`, and `mental_model` rows.
+
+You can also ask Claude to search for a specific belief before giving feedback:
+
+```text
+Search chitta for memories about how I like code reviews.
+```
+
+Feedback requires a concrete memory UUID. Prefixes are fine if they resolve
+unambiguously, but there is no "last memory" shorthand.
+
+### Reinforce true memories with `/agree`
+
+Claude command file: `~/.claude/commands/agree.md`.
+
+Use `/agree` when a working-model entry rings true and should become more
+durable:
+
+```text
+/agree 018f2c9a-...
+/agree 018f2c9a-... 018f2cb1-...
+```
+
+The command calls `record_feedback` with `kind: "agree"` for each memory. That:
+
+- raises confidence by `0.05`, capped at `1.0`
+- increments `reinforcement_count`
+- updates `last_reinforced_at`
+- writes a raw feedback observation tagged `feedback` and `agree`
+
+If you do not know the UUID, describe the memory and let Claude resolve it from
+the current session context:
+
+```text
+/agree the one about preferring concise implementation notes
+```
+
+Claude should ask for a concrete ID if it cannot identify the target
+confidently.
+
+### Challenge wrong memories with `/disagree`
+
+Claude command file: `~/.claude/commands/disagree.md`.
+
+Use `/disagree` when a consolidated memory is wrong or stale:
+
+```text
+/disagree 018f2c9a-...
+/disagree 018f2c9a-... 018f2cb1-...
+```
+
+The command calls `record_feedback` with `kind: "disagree"`. That lowers
+confidence by `0.10`, floored at `0.0`, and writes a raw feedback observation
+tagged `feedback` and `disagree`.
+
+Add a correction after `--` when you know what should replace or refine the
+memory:
+
+```text
+/disagree 018f2c9a-... -- I prefer direct implementation notes only after the risk is clear.
+```
+
+With a correction, `record_feedback` also writes a separate raw observation
+tagged `correction` and `contradicts:<memory_id>`. The next `chitta reflect`
+run uses that correction as contradicting evidence and can supersede the old
+consolidated memory with a better one.
+
+### Synthesize with `chitta reflect`
+
+Run reflect after enough raw evidence has accumulated, or after recording
+important corrections:
+
+```bash
+chitta reflect --profile josh
+```
+
+By default this uses your local Claude CLI subscription:
+
+```bash
+claude -p --output-format text --model claude-sonnet-4-6
+```
+
+Override the model if needed:
+
+```bash
+chitta reflect --profile josh --model claude-opus-4-6
+```
+
+To use the Anthropic API instead, build with the `api` feature and provide
+`ANTHROPIC_API_KEY`:
+
+```bash
+cargo build --features api
+ANTHROPIC_API_KEY=... chitta reflect --profile josh --api-key
+```
+
+Reflect reads raw `observation`, `episode`, and `decision` rows since the last
+synthesis run for the profile. It asks the LLM to extract candidate claims,
+cluster similar claims, check new claims against existing consolidated
+memories, and emit synthesized rows tagged `reflect` and `synthesised`.
+
+The default emission threshold is conservative: a cluster must have at least
+five source rows, span at least two distinct record-time days, and use source
+rows no older than 90 days. New consolidated memories start with confidence
+based on cluster size, and contradictory claims supersede the old active
+memory instead of deleting it.
+
+The command prints a summary such as:
+
+```text
+reflect: 12 raw rows since 2026-05-10 14:20:00 UTC
+synthesis: clusters_formed=3, clusters_emitted=2, supersessions=1
+```
+
+If there is nothing new to process, it prints:
+
+```text
+reflect: nothing to synthesize for profile 'josh'
+```
+
+### Check pending evidence
+
+From an MCP-enabled session, call `reflect_status` before a full synthesis run:
+
+```text
+Use chitta reflect_status for profile josh.
+```
+
+`reflect_status` counts raw rows since the last status check, reports the date
+range and memory-type breakdown, and notes any disagree-flagged memory IDs. It
+does not synthesize or write consolidated memories; `chitta reflect` does that.
 
 ## Testing
 
@@ -241,3 +400,13 @@ Chitta is a Rust binary (~6k LOC) that speaks
 | `serve` | Run as MCP server (default). |
 | `replay` | Re-run logged queries for retrieval regression detection. |
 | `backfill` | Backfill sparse embeddings for rows that have none. |
+| `reflect` | Run working-model synthesis for a profile. |
+
+### `reflect`
+
+```bash
+chitta reflect --profile josh [--model claude-sonnet-4-6] [--api-key]
+```
+
+`--api-key` requires a binary built with `--features api`; without it, reflect
+uses the local `claude` CLI.
