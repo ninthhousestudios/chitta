@@ -189,5 +189,6 @@ mod tests {
     fn confidence_caps_at_090() {
         assert!((emission_confidence(8) - 0.90).abs() < 1e-6);
         assert!((emission_confidence(20) - 0.90).abs() < 1e-6);
+        assert!((emission_confidence(100) - 0.90).abs() < 1e-6);
     }
 }
