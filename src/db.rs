@@ -862,6 +862,22 @@ pub async fn insert_reflect_run_with(
     Ok(row)
 }
 
+pub async fn last_status_run(pool: &PgPool, profile: &str) -> Result<Option<ReflectRunRow>> {
+    let row = sqlx::query_as::<_, ReflectRunRow>(
+        r#"
+        SELECT id, profile, started_at, completed_at, rows_scanned, summary
+        FROM reflect_runs
+        WHERE profile = $1 AND run_type = 'status'
+        ORDER BY started_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(profile)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
 pub async fn last_synthesis_run(pool: &PgPool, profile: &str) -> Result<Option<ReflectRunRow>> {
     let row = sqlx::query_as::<_, ReflectRunRow>(
         r#"

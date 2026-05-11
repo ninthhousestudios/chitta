@@ -56,8 +56,8 @@ pub struct DisagreeFlagged {
 pub async fn handle(pool: &PgPool, args: ReflectStatusArgs) -> Result<ReflectStatusOutput> {
     validate::profile(TOOL, &args.profile)?;
 
-    let last_run = db::last_reflect_run(pool, &args.profile).await?;
-    let since = last_run.as_ref().and_then(|r| r.completed_at);
+    let last_run = db::last_status_run(pool, &args.profile).await?;
+    let since = last_run.as_ref().map(|r| r.started_at);
     let last_run_id = last_run.as_ref().map(|r| r.id);
 
     let rows = db::fetch_raw_since(pool, &args.profile, since).await?;

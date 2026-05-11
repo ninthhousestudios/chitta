@@ -905,7 +905,10 @@ async fn update_memory_requires_at_least_one_field() {
 
     match &err {
         ChittaError::InvalidArgument { argument, .. } => {
-            assert_eq!(argument, "fields", "expected argument='fields', got: {argument}");
+            assert_eq!(
+                argument, "fields",
+                "expected argument='fields', got: {argument}"
+            );
         }
         other => panic!("expected InvalidArgument, got {other:?}"),
     }
@@ -3648,7 +3651,8 @@ async fn synthesis_extract_candidates_smoke() {
     ];
 
     let llm = FixtureLlm;
-    let candidates = synthesis::extract_candidates(&llm, &rows).await.unwrap();
+    let extraction = synthesis::extract_candidates(&llm, &rows).await.unwrap();
+    let candidates = extraction.candidates;
 
     assert_eq!(
         candidates.len(),
@@ -3756,7 +3760,8 @@ async fn synthesis_cluster_and_emit() {
 
     let llm = ClusterFixtureLlm::new();
 
-    let candidates = synthesis::extract_candidates(&llm, &rows).await.unwrap();
+    let extraction = synthesis::extract_candidates(&llm, &rows).await.unwrap();
+    let candidates = extraction.candidates;
     assert_eq!(candidates.len(), 6);
 
     let clusters = synthesis::cluster_candidates(&llm, &candidates)

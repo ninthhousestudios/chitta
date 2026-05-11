@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use pgvector::Vector;
@@ -13,6 +14,8 @@ use crate::db::{self, MemoryRow};
 use crate::embedding::Embedder;
 use crate::error::{ChittaError, Result};
 use crate::facets::Facets;
+
+const LLM_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Candidate {
@@ -49,15 +52,33 @@ struct RawCandidate {
 
 const VALID_TYPES: &[&str] = &["trait", "value", "pattern", "preference", "mental_model"];
 
+pub struct ExtractionStats {
+    pub candidates: Vec<Candidate>,
+    pub rows_scanned: usize,
+    pub rows_skipped: usize,
+    pub extraction_errors: usize,
+}
+
 pub async fn extract_candidates(
     llm: &(impl Llm + ?Sized),
     rows: &[MemoryRow],
-) -> Result<Vec<Candidate>> {
-    let mut all = Vec::new();
+) -> Result<ExtractionStats> {
+    let mut stats = ExtractionStats {
+        candidates: Vec::new(),
+        rows_scanned: rows.len(),
+        rows_skipped: 0,
+        extraction_errors: 0,
+    };
     for row in rows {
         match extract_one(llm, row).await {
-            Ok(candidates) => all.extend(candidates),
+            Ok(candidates) => {
+                if candidates.is_empty() {
+                    stats.rows_skipped += 1;
+                }
+                stats.candidates.extend(candidates);
+            }
             Err(e) => {
+                stats.extraction_errors += 1;
                 tracing::warn!(
                     memory_id = %row.id,
                     error = %e,
@@ -66,12 +87,14 @@ pub async fn extract_candidates(
             }
         }
     }
-    Ok(all)
+    Ok(stats)
 }
 
 async fn extract_one(llm: &(impl Llm + ?Sized), row: &MemoryRow) -> Result<Vec<Candidate>> {
     let user = user_prompt(row);
-    let response = llm.complete(SYSTEM_PROMPT, &user).await?;
+    let response = tokio::time::timeout(LLM_TIMEOUT, llm.complete(SYSTEM_PROMPT, &user))
+        .await
+        .map_err(|_| ChittaError::Internal("LLM call timed out during extraction".into()))??;
     parse_response(&response, row.id)
 }
 
@@ -149,7 +172,9 @@ pub async fn cluster_candidates(
     }
 
     let user = cluster_user_prompt(candidates);
-    let response = llm.complete(CLUSTER_SYSTEM_PROMPT, &user).await?;
+    let response = tokio::time::timeout(LLM_TIMEOUT, llm.complete(CLUSTER_SYSTEM_PROMPT, &user))
+        .await
+        .map_err(|_| ChittaError::Internal("LLM call timed out during clustering".into()))??;
     parse_cluster_response(&response, candidates)
 }
 
@@ -383,7 +408,14 @@ pub async fn detect_contradiction(
     }
 
     let user = contradiction_user_prompt(cluster_claim, existing);
-    let response = llm.complete(CONTRADICTION_SYSTEM_PROMPT, &user).await?;
+    let response = tokio::time::timeout(
+        LLM_TIMEOUT,
+        llm.complete(CONTRADICTION_SYSTEM_PROMPT, &user),
+    )
+    .await
+    .map_err(|_| {
+        ChittaError::Internal("LLM call timed out during contradiction detection".into())
+    })??;
     parse_contradiction_response(&response, existing)
 }
 
@@ -468,7 +500,7 @@ pub async fn emit_with_supersession(
         record_time: now,
         idempotency_key: meta_idem_key,
         source: Some("reflect".into()),
-        memory_type: "mental_model".into(),
+        memory_type: "supersession_record".into(),
         tags: vec![
             "reflect".into(),
             "synthesised".into(),
@@ -529,6 +561,9 @@ pub struct SynthesisResult {
     pub clusters_formed: usize,
     pub clusters_emitted: usize,
     pub supersessions: usize,
+    pub rows_scanned: usize,
+    pub rows_skipped: usize,
+    pub extraction_errors: usize,
 }
 
 pub async fn run_synthesis(
@@ -539,8 +574,8 @@ pub async fn run_synthesis(
     rows: &[MemoryRow],
     now: DateTime<Utc>,
 ) -> Result<SynthesisResult> {
-    let candidates = extract_candidates(llm, rows).await?;
-    let clusters = cluster_candidates(llm, &candidates).await?;
+    let extraction = extract_candidates(llm, rows).await?;
+    let clusters = cluster_candidates(llm, &extraction.candidates).await?;
 
     let source_times: HashMap<Uuid, DateTime<Utc>> =
         rows.iter().map(|r| (r.id, r.record_time)).collect();
@@ -567,6 +602,9 @@ pub async fn run_synthesis(
         clusters_formed: clusters.len(),
         clusters_emitted: 0,
         supersessions: 0,
+        rows_scanned: extraction.rows_scanned,
+        rows_skipped: extraction.rows_skipped,
+        extraction_errors: extraction.extraction_errors,
     };
 
     for cluster in &clusters {
@@ -666,7 +704,10 @@ mod tests {
         let llm = MockLlm::new(vec!["[]"]);
 
         let result = extract_candidates(&llm, &[row]).await.unwrap();
-        assert!(result.is_empty());
+        assert!(result.candidates.is_empty());
+        assert_eq!(result.rows_scanned, 1);
+        assert_eq!(result.rows_skipped, 1);
+        assert_eq!(result.extraction_errors, 0);
     }
 
     #[tokio::test]
@@ -678,10 +719,13 @@ mod tests {
         ]);
 
         let result = extract_candidates(&llm, &[row]).await.unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].memory_type, "preference");
-        assert_eq!(result[0].claim, "Josh prefers Vim as his primary editor");
-        assert_eq!(result[0].source_id, id);
+        assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.candidates[0].memory_type, "preference");
+        assert_eq!(
+            result.candidates[0].claim,
+            "Josh prefers Vim as his primary editor"
+        );
+        assert_eq!(result.candidates[0].source_id, id);
     }
 
     #[tokio::test]
@@ -701,11 +745,11 @@ mod tests {
         ]);
 
         let result = extract_candidates(&llm, &[row]).await.unwrap();
-        assert_eq!(result.len(), 3);
-        assert_eq!(result[0].memory_type, "value");
-        assert_eq!(result[1].memory_type, "preference");
-        assert_eq!(result[2].memory_type, "pattern");
-        assert!(result.iter().all(|c| c.source_id == id));
+        assert_eq!(result.candidates.len(), 3);
+        assert_eq!(result.candidates[0].memory_type, "value");
+        assert_eq!(result.candidates[1].memory_type, "preference");
+        assert_eq!(result.candidates[2].memory_type, "pattern");
+        assert!(result.candidates.iter().all(|c| c.source_id == id));
     }
 
     #[tokio::test]
@@ -722,8 +766,9 @@ mod tests {
         ]);
 
         let result = extract_candidates(&llm, &rows).await.unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].source_id, id2);
+        assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.candidates[0].source_id, id2);
+        assert_eq!(result.extraction_errors, 1);
     }
 
     #[tokio::test]
@@ -739,9 +784,9 @@ mod tests {
         ]);
 
         let result = extract_candidates(&llm, &[row]).await.unwrap();
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].memory_type, "preference");
-        assert_eq!(result[1].memory_type, "trait");
+        assert_eq!(result.candidates.len(), 2);
+        assert_eq!(result.candidates[0].memory_type, "preference");
+        assert_eq!(result.candidates[1].memory_type, "trait");
     }
 
     #[tokio::test]
@@ -753,7 +798,7 @@ mod tests {
         ]);
 
         let result = extract_candidates(&llm, &[row]).await.unwrap();
-        assert_eq!(result.len(), 1);
+        assert_eq!(result.candidates.len(), 1);
     }
 
     #[tokio::test]
@@ -768,8 +813,8 @@ mod tests {
         ]);
 
         let result = extract_candidates(&llm, &[row]).await.unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].claim, "real claim");
+        assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.candidates[0].claim, "real claim");
     }
 
     #[tokio::test]
@@ -786,9 +831,9 @@ mod tests {
         ]);
 
         let result = extract_candidates(&llm, &rows).await.unwrap();
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].source_id, id1);
-        assert_eq!(result[1].source_id, id2);
+        assert_eq!(result.candidates.len(), 2);
+        assert_eq!(result.candidates[0].source_id, id1);
+        assert_eq!(result.candidates[1].source_id, id2);
     }
 
     #[tokio::test]
@@ -805,8 +850,9 @@ mod tests {
         ]);
 
         let result = extract_candidates(&llm, &rows).await.unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].source_id, id1);
+        assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.candidates[0].source_id, id1);
+        assert_eq!(result.extraction_errors, 1);
     }
 
     // ── contradiction detection tests ──────────────────────────────

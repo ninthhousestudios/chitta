@@ -27,6 +27,9 @@ pub async fn reflect_pipeline(
             clusters_formed: 0,
             clusters_emitted: 0,
             supersessions: 0,
+            rows_scanned: 0,
+            rows_skipped: 0,
+            extraction_errors: 0,
         });
     }
 
@@ -42,6 +45,9 @@ pub async fn reflect_pipeline(
         "clusters_formed": result.clusters_formed,
         "clusters_emitted": result.clusters_emitted,
         "supersessions": result.supersessions,
+        "rows_scanned": result.rows_scanned,
+        "rows_skipped": result.rows_skipped,
+        "extraction_errors": result.extraction_errors,
     });
     db::insert_reflect_run_with(
         pool,
