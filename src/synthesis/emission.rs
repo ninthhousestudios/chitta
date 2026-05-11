@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use pgvector::Vector;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -16,17 +15,35 @@ pub fn emission_confidence(cluster_size: usize) -> f32 {
     (0.50 + 0.05 * cluster_size as f32).min(0.90)
 }
 
-pub async fn emit_consolidated(
-    pool: &PgPool,
-    embedder: &Arc<Embedder>,
-    cluster: &Cluster,
+fn embed_and_build(
+    embed_out: &crate::embedding::EmbedOutput,
     profile: &str,
+    content: String,
+    idempotency_key: String,
+    memory_type: String,
+    tags: Vec<String>,
+    facets: Facets,
+    confidence: f32,
     now: DateTime<Utc>,
-    source_facets: Facets,
-) -> Result<(MemoryRow, bool)> {
-    let confidence = emission_confidence(cluster.source_ids.len());
-    let id = Uuid::now_v7();
+) -> Result<MemoryRow> {
+    let sparse_json = serde_json::to_value(&embed_out.sparse)
+        .map_err(|e| ChittaError::Internal(format!("sparse serialization: {e}")))?;
 
+    Ok(MemoryRow::new_emission(
+        profile,
+        content,
+        idempotency_key,
+        memory_type,
+        tags,
+        facets,
+        confidence,
+        embed_out.dense.clone(),
+        sparse_json,
+        now,
+    ))
+}
+
+fn cluster_idem_key(cluster: &Cluster) -> String {
     let mut sorted_ids = cluster.source_ids.clone();
     sorted_ids.sort();
     let key_material = format!(
@@ -39,53 +56,38 @@ pub async fn emit_consolidated(
             .join(",")
     );
     let hash = Sha256::digest(key_material.as_bytes());
-    let idem_key = format!(
+    format!(
         "reflect-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        hash[0],
-        hash[1],
-        hash[2],
-        hash[3],
-        hash[4],
-        hash[5],
-        hash[6],
-        hash[7],
-        hash[8],
-        hash[9],
-        hash[10],
-        hash[11],
-        hash[12],
-        hash[13],
-        hash[14],
-        hash[15]
-    );
+        hash[0], hash[1], hash[2], hash[3],
+        hash[4], hash[5], hash[6], hash[7],
+        hash[8], hash[9], hash[10], hash[11],
+        hash[12], hash[13], hash[14], hash[15],
+    )
+}
 
+pub async fn emit_consolidated(
+    pool: &PgPool,
+    embedder: &Arc<Embedder>,
+    cluster: &Cluster,
+    profile: &str,
+    now: DateTime<Utc>,
+    source_facets: Facets,
+) -> Result<(MemoryRow, bool)> {
     let embed_out = embedder
         .embed_full(&cluster.representative_claim, "reflect")
         .await?;
-    let sparse_json = serde_json::to_value(&embed_out.sparse)
-        .map_err(|e| ChittaError::Internal(format!("sparse serialization: {e}")))?;
 
-    let row = MemoryRow {
-        id,
-        profile: profile.to_string(),
-        content: cluster.representative_claim.clone(),
-        embedding: Some(Vector::from(embed_out.dense)),
-        sparse_embedding: Some(sparse_json),
-        event_time: now,
-        record_time: now,
-        idempotency_key: idem_key,
-        source: Some("reflect".into()),
-        memory_type: cluster.memory_type.clone(),
-        tags: vec!["reflect".into(), "synthesised".into()],
-        external_refs: None,
-        metadata: None,
-        facets: source_facets,
-        superseded_by: None,
-        confidence: Some(confidence),
-        reinforcement_count: 0,
-        last_reinforced_at: None,
-        invalidated_at: None,
-    };
+    let row = embed_and_build(
+        &embed_out,
+        profile,
+        cluster.representative_claim.clone(),
+        cluster_idem_key(cluster),
+        cluster.memory_type.clone(),
+        vec!["reflect".into(), "synthesised".into()],
+        source_facets,
+        emission_confidence(cluster.source_ids.len()),
+        now,
+    )?;
 
     let derivations: Vec<(Uuid, String)> = cluster
         .source_ids
@@ -119,50 +121,38 @@ pub async fn emit_with_supersession(
         "Josh shifted from '{}' to '{}' — {}",
         contradiction.existing_claim, cluster.representative_claim, contradiction.shift_description,
     );
-    let meta_id = Uuid::now_v7();
     let meta_idem_key = format!("reflect-meta-{}-{}", contradiction.existing_id, new_row.id);
 
     let embed_out = embedder.embed_full(&meta_content, "reflect").await?;
-    let sparse_json = serde_json::to_value(&embed_out.sparse)
-        .map_err(|e| ChittaError::Internal(format!("sparse serialization: {e}")))?;
 
-    let meta_row = MemoryRow {
-        id: meta_id,
-        profile: profile.to_string(),
-        content: meta_content,
-        embedding: Some(Vector::from(embed_out.dense)),
-        sparse_embedding: Some(sparse_json),
-        event_time: now,
-        record_time: now,
-        idempotency_key: meta_idem_key,
-        source: Some("reflect".into()),
-        memory_type: "supersession_record".into(),
-        tags: vec![
+    let meta_row = embed_and_build(
+        &embed_out,
+        profile,
+        meta_content,
+        meta_idem_key,
+        "supersession_record".into(),
+        vec![
             "reflect".into(),
             "synthesised".into(),
             "supersession".into(),
         ],
-        external_refs: None,
-        metadata: None,
-        facets: source_facets,
-        superseded_by: None,
-        confidence: Some(emission_confidence(cluster.source_ids.len())),
-        reinforcement_count: 0,
-        last_reinforced_at: None,
-        invalidated_at: None,
-    };
+        source_facets,
+        emission_confidence(cluster.source_ids.len()),
+        now,
+    )?;
 
     let derivations = vec![
         (contradiction.existing_id, "supersession_of".into()),
         (new_row.id, "supersession_to".into()),
     ];
 
+    let meta_row_id = meta_row.id;
     let (_, meta_replay) =
         db::insert_memory_with_derivations(pool, &meta_row, &derivations).await?;
 
     Ok(SupersessionResult {
         superseded_id: contradiction.existing_id,
-        meta_row_id: meta_id,
+        meta_row_id,
         new_row,
         idempotent_replay: idempotent_replay && already_superseded && meta_replay,
     })

@@ -41,6 +41,43 @@ pub struct MemoryRow {
     pub invalidated_at: Option<DateTime<Utc>>,
 }
 
+impl MemoryRow {
+    pub fn new_emission(
+        profile: &str,
+        content: String,
+        idempotency_key: String,
+        memory_type: String,
+        tags: Vec<String>,
+        facets: Facets,
+        confidence: f32,
+        dense: Vec<f32>,
+        sparse: serde_json::Value,
+        now: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            id: Uuid::now_v7(),
+            profile: profile.to_string(),
+            content,
+            embedding: Some(Vector::from(dense)),
+            sparse_embedding: Some(sparse),
+            event_time: now,
+            record_time: now,
+            idempotency_key,
+            source: Some("reflect".into()),
+            memory_type,
+            tags,
+            external_refs: None,
+            metadata: None,
+            facets,
+            superseded_by: None,
+            confidence: Some(confidence),
+            reinforcement_count: 0,
+            last_reinforced_at: None,
+            invalidated_at: None,
+        }
+    }
+}
+
 /// One hit from an ANN search. `similarity` is the raw cosine score
 /// (`1 - cosine_distance`). `score` is the final composite after any
 /// recency boost, RRF fusion, and type-weight multiplier — used for ranking.
