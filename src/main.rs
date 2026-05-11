@@ -17,7 +17,6 @@ use chitta::{
     ingest,
     llm::ClaudeCliLlm,
     mcp::ChittaServer,
-    synthesis,
 };
 
 /// chitta: agent-native persistent memory MCP server.
@@ -397,37 +396,11 @@ async fn run_reflect(profile: String, model: String, use_api: bool) -> Result<()
     )
     .context("loading embedding model")?;
 
-    let last_run = db::last_reflect_run(&pool, &profile).await?;
-    let since = last_run.as_ref().map(|r| r.started_at);
-
-    let rows = db::fetch_raw_since(&pool, &profile, since).await?;
-
-    if rows.is_empty() {
-        println!("reflect: nothing to synthesize for profile '{profile}'");
-        return Ok(());
-    }
-
-    println!(
-        "reflect: {} raw rows since {}",
-        rows.len(),
-        since
-            .map(|t| t.to_string())
-            .unwrap_or("(all time)".into())
-    );
-
-    let result = if use_api {
+    if use_api {
         #[cfg(feature = "api")]
         {
             let llm = chitta::llm::ClaudeApiLlm::from_env(model)?;
-            synthesis::run_synthesis(
-                &pool,
-                &embedder,
-                &llm,
-                &profile,
-                &rows,
-                chrono::Utc::now(),
-            )
-            .await?
+            chitta::reflect::reflect_pipeline(&pool, &embedder, &llm, &profile).await?;
         }
         #[cfg(not(feature = "api"))]
         {
@@ -437,28 +410,8 @@ async fn run_reflect(profile: String, model: String, use_api: bool) -> Result<()
         }
     } else {
         let llm = ClaudeCliLlm::new(model);
-        synthesis::run_synthesis(
-            &pool,
-            &embedder,
-            &llm,
-            &profile,
-            &rows,
-            chrono::Utc::now(),
-        )
-        .await?
+        chitta::reflect::reflect_pipeline(&pool, &embedder, &llm, &profile).await?;
     };
-
-    let summary = serde_json::json!({
-        "clusters_formed": result.clusters_formed,
-        "clusters_emitted": result.clusters_emitted,
-        "supersessions": result.supersessions,
-    });
-    db::insert_reflect_run(&pool, &profile, rows.len() as i32, Some(summary)).await?;
-
-    println!(
-        "synthesis: clusters_formed={}, clusters_emitted={}, supersessions={}",
-        result.clusters_formed, result.clusters_emitted, result.supersessions
-    );
 
     Ok(())
 }

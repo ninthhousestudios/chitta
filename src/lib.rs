@@ -13,6 +13,7 @@ pub mod facets;
 pub mod ingest;
 pub mod llm;
 pub mod mcp;
+pub mod reflect;
 pub mod retrieval;
 pub mod synthesis;
 pub mod tools;

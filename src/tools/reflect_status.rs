@@ -105,7 +105,15 @@ pub async fn handle(pool: &PgPool, args: ReflectStatusArgs) -> Result<ReflectSta
         "disagree_flagged_count": disagree_flagged.len(),
     });
 
-    let run = db::insert_reflect_run(pool, &args.profile, total as i32, Some(summary_json)).await?;
+    let run = db::insert_reflect_run_with(
+        pool,
+        &args.profile,
+        total as i32,
+        Some(summary_json),
+        chrono::Utc::now(),
+        Some("status"),
+    )
+    .await?;
 
     Ok(ReflectStatusOutput {
         profile: args.profile,

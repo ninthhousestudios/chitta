@@ -834,19 +834,46 @@ pub async fn insert_reflect_run(
     rows_scanned: i32,
     summary: Option<serde_json::Value>,
 ) -> Result<ReflectRunRow> {
-    let now = Utc::now();
+    insert_reflect_run_with(pool, profile, rows_scanned, summary, Utc::now(), None).await
+}
+
+pub async fn insert_reflect_run_with(
+    pool: &PgPool,
+    profile: &str,
+    rows_scanned: i32,
+    summary: Option<serde_json::Value>,
+    started_at: DateTime<Utc>,
+    run_type: Option<&str>,
+) -> Result<ReflectRunRow> {
     let row = sqlx::query_as::<_, ReflectRunRow>(
         r#"
-        INSERT INTO reflect_runs (profile, started_at, completed_at, rows_scanned, summary)
-        VALUES ($1, $2, $2, $3, $4)
+        INSERT INTO reflect_runs (profile, started_at, completed_at, rows_scanned, summary, run_type)
+        VALUES ($1, $2, $2, $3, $4, $5)
         RETURNING id, profile, started_at, completed_at, rows_scanned, summary
         "#,
     )
     .bind(profile)
-    .bind(now)
+    .bind(started_at)
     .bind(rows_scanned)
     .bind(summary)
+    .bind(run_type)
     .fetch_one(pool)
+    .await?;
+    Ok(row)
+}
+
+pub async fn last_synthesis_run(pool: &PgPool, profile: &str) -> Result<Option<ReflectRunRow>> {
+    let row = sqlx::query_as::<_, ReflectRunRow>(
+        r#"
+        SELECT id, profile, started_at, completed_at, rows_scanned, summary
+        FROM reflect_runs
+        WHERE profile = $1 AND run_type = 'synthesis'
+        ORDER BY started_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(profile)
+    .fetch_optional(pool)
     .await?;
     Ok(row)
 }

@@ -4393,25 +4393,11 @@ async fn reflect_pipeline_end_to_end() {
             .unwrap();
     }
 
-    // Fetch rows the same way the reflect subcommand does
-    let since = None; // first run — all time
-    let rows = db::fetch_raw_since(&h.pool, &h.profile, since)
+    // Run the full reflect pipeline (same code path as `chitta reflect`)
+    let llm = ReflectFixtureLlm;
+    let result = chitta::reflect::reflect_pipeline(&h.pool, &h.embedder, &llm, &h.profile)
         .await
         .unwrap();
-    assert_eq!(rows.len(), 6);
-
-    // Run synthesis with ReflectFixtureLlm
-    let llm = ReflectFixtureLlm;
-    let result = synthesis::run_synthesis(
-        &h.pool,
-        &h.embedder,
-        &llm,
-        &h.profile,
-        &rows,
-        Utc::now(),
-    )
-    .await
-    .unwrap();
 
     assert!(
         result.clusters_formed >= 1,
@@ -4419,37 +4405,17 @@ async fn reflect_pipeline_end_to_end() {
         result.clusters_formed
     );
 
-    // Write run marker
-    let summary = serde_json::json!({
-        "clusters_formed": result.clusters_formed,
-        "clusters_emitted": result.clusters_emitted,
-        "supersessions": result.supersessions,
-    });
-    let run_row = db::insert_reflect_run(
-        &h.pool,
-        &h.profile,
-        rows.len() as i32,
-        Some(summary),
-    )
-    .await
-    .unwrap();
-    assert_eq!(run_row.rows_scanned, 6);
-    assert!(run_row.summary.is_some());
-
-    // Verify last_reflect_run now returns the run we just wrote
-    let last = db::last_reflect_run(&h.pool, &h.profile)
+    // Verify synthesis run marker was written
+    let last = db::last_synthesis_run(&h.pool, &h.profile)
         .await
         .unwrap()
-        .expect("should have a reflect run");
-    assert_eq!(last.id, run_row.id);
+        .expect("should have a synthesis run");
+    assert_eq!(last.rows_scanned, 6);
+    assert!(last.summary.is_some());
 
-    // A subsequent fetch_raw_since with the run's started_at should return 0 rows
-    let rows2 = db::fetch_raw_since(&h.pool, &h.profile, Some(last.started_at))
+    // A subsequent reflect_pipeline should find 0 new rows
+    let result2 = chitta::reflect::reflect_pipeline(&h.pool, &h.embedder, &llm, &h.profile)
         .await
         .unwrap();
-    assert!(
-        rows2.is_empty(),
-        "expected 0 rows after reflect run, got {}",
-        rows2.len()
-    );
+    assert_eq!(result2.clusters_formed, 0, "second run should find nothing new");
 }
