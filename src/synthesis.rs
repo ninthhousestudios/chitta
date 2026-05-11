@@ -424,16 +424,15 @@ pub async fn emit_with_supersession(
     let (new_row, idempotent_replay) =
         emit_consolidated(pool, embedder, cluster, profile, now).await?;
 
-    if idempotent_replay {
-        return Ok(SupersessionResult {
-            superseded_id: contradiction.existing_id,
-            meta_row_id: Uuid::nil(),
-            new_row,
-            idempotent_replay: true,
-        });
-    }
+    let old_row = db::get_memory_by_id(pool, profile, contradiction.existing_id).await?;
+    let already_superseded = old_row
+        .as_ref()
+        .and_then(|r| r.superseded_by)
+        .is_some();
 
-    db::supersede_memory(pool, contradiction.existing_id, new_row.id).await?;
+    if !already_superseded {
+        db::supersede_memory(pool, contradiction.existing_id, new_row.id).await?;
+    }
 
     let meta_content = format!(
         "Josh shifted from '{}' to '{}' — {}",
@@ -482,13 +481,14 @@ pub async fn emit_with_supersession(
         (new_row.id, "supersession_to".into()),
     ];
 
-    db::insert_memory_with_derivations(pool, &meta_row, &derivations).await?;
+    let (_, meta_replay) =
+        db::insert_memory_with_derivations(pool, &meta_row, &derivations).await?;
 
     Ok(SupersessionResult {
         superseded_id: contradiction.existing_id,
         meta_row_id: meta_id,
         new_row,
-        idempotent_replay: false,
+        idempotent_replay: idempotent_replay && already_superseded && meta_replay,
     })
 }
 
@@ -539,7 +539,22 @@ pub async fn run_synthesis(
         rows.iter().map(|r| (r.id, r.record_time)).collect();
     let config = ThresholdConfig::default();
 
-    let existing = db::fetch_profile_candidates(pool, profile).await?;
+    let mut existing = db::fetch_profile_candidates(pool, profile).await?;
+
+    let disagree_targets: HashSet<Uuid> =
+        find_disagree_targets(rows).into_iter().collect();
+    let existing_ids: HashSet<Uuid> = existing.iter().map(|r| r.id).collect();
+    for &target_id in &disagree_targets {
+        if !existing_ids.contains(&target_id) {
+            if let Some(row) = db::get_memory_by_id(pool, profile, target_id).await? {
+                if row.superseded_by.is_none() && row.invalidated_at.is_none() {
+                    existing.push(row);
+                }
+            }
+        }
+    }
+
+    let mut superseded_ids: HashSet<Uuid> = HashSet::new();
 
     let mut result = SynthesisResult {
         clusters_formed: clusters.len(),
@@ -552,11 +567,20 @@ pub async fn run_synthesis(
             continue;
         }
 
+        let active_existing: Vec<&MemoryRow> = existing
+            .iter()
+            .filter(|r| !superseded_ids.contains(&r.id))
+            .collect();
+        let active_refs: Vec<MemoryRow> =
+            active_existing.into_iter().cloned().collect();
+
         let contradiction =
-            detect_contradiction(llm, &cluster.representative_claim, &existing).await?;
+            detect_contradiction(llm, &cluster.representative_claim, &active_refs)
+                .await?;
 
         if let Some(c) = contradiction {
             emit_with_supersession(pool, embedder, cluster, &c, profile, now).await?;
+            superseded_ids.insert(c.existing_id);
             result.supersessions += 1;
         } else {
             emit_consolidated(pool, embedder, cluster, profile, now).await?;

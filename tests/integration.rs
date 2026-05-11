@@ -4139,3 +4139,186 @@ async fn synthesis_disagree_flagged_supersession() {
         .find(|r| r.tags.contains(&"supersession".to_string()));
     assert!(meta.is_some(), "meta-observation should be written for disagree supersession");
 }
+
+// ---- synthesis: two clusters targeting same memory ───────────────────
+
+struct TwoClusterFixtureLlm {
+    existing_claim: String,
+}
+
+impl Llm for TwoClusterFixtureLlm {
+    async fn complete(&self, system: &str, user: &str) -> chitta::error::Result<String> {
+        if system.contains("extract consolidated claims") {
+            if user.contains("prefers spaces") {
+                Ok(r#"[{"memory_type": "preference", "claim": "Josh prefers spaces"}]"#.into())
+            } else if user.contains("uses 4-space indent") {
+                Ok(r#"[{"memory_type": "preference", "claim": "Josh uses 4-space indent"}]"#.into())
+            } else {
+                Ok("[]".into())
+            }
+        } else if system.contains("group candidate claims") {
+            let count = user.lines().filter(|l| l.starts_with('[')).count();
+            if count >= 10 {
+                let half = count / 2;
+                let first: Vec<usize> = (0..half).collect();
+                let second: Vec<usize> = (half..count).collect();
+                let j1 = serde_json::to_string(&first).unwrap();
+                let j2 = serde_json::to_string(&second).unwrap();
+                Ok(format!(
+                    r#"[
+                        {{"representative_claim": "Josh prefers spaces over tabs", "memory_type": "preference", "member_indices": {j1}}},
+                        {{"representative_claim": "Josh uses 4-space indent style", "memory_type": "preference", "member_indices": {j2}}}
+                    ]"#
+                ))
+            } else {
+                let indices: Vec<usize> = (0..count).collect();
+                let j = serde_json::to_string(&indices).unwrap();
+                Ok(format!(
+                    r#"[{{"representative_claim": "Josh prefers spaces", "memory_type": "preference", "member_indices": {j}}}]"#
+                ))
+            }
+        } else if system.contains("detect contradictions") {
+            if user.contains(&self.existing_claim) {
+                Ok(r#"{"contradicts_index": 0, "shift": "switched from tabs to spaces"}"#.into())
+            } else {
+                Ok(r#"{"contradicts_index": null}"#.into())
+            }
+        } else {
+            Ok(r#"{"contradicts_index": null}"#.into())
+        }
+    }
+}
+
+#[tokio::test]
+async fn synthesis_two_clusters_same_target_only_first_supersedes() {
+    let h = require_harness!("synth_two_cluster");
+
+    // 1. Seed existing consolidated memory
+    let old_out = tools::store::handle(
+        &h.pool,
+        h.embedder.clone(),
+        StoreArgs {
+            profile: h.profile.clone(),
+            content: "Josh prefers tabs over spaces".into(),
+            idempotency_key: "old-tabs".into(),
+            event_time: None,
+            tags: Some(vec!["reflect".into(), "synthesised".into()]),
+            metadata: None,
+            memory_type: Some("preference".into()),
+            external_refs: None,
+            facets: Facets::default(),
+            confidence: Some(0.75),
+            source: Some("reflect".into()),
+            derivations: None,
+        },
+    )
+    .await
+    .unwrap();
+    let old_id = old_out.id;
+
+    // 2. Seed 12 observations: 6 "prefers spaces" + 6 "uses 4-space indent"
+    //    Both clusters could contradict "prefers tabs"
+    let base_time = Utc::now() - Duration::days(30);
+    let mut stored_ids = Vec::new();
+
+    for i in 0..6 {
+        let day_offset = Duration::days(i * 3);
+        let out = tools::store::handle(
+            &h.pool,
+            h.embedder.clone(),
+            StoreArgs {
+                profile: h.profile.clone(),
+                content: format!("Josh prefers spaces — observation {i}"),
+                idempotency_key: format!("two-cluster-spaces-{i}"),
+                event_time: Some(base_time + day_offset),
+                tags: None,
+                metadata: None,
+                memory_type: Some("observation".into()),
+                external_refs: None,
+                facets: Facets::default(),
+                confidence: None,
+                source: None,
+                derivations: None,
+            },
+        )
+        .await
+        .unwrap();
+        stored_ids.push(out.id);
+    }
+    for i in 0..6 {
+        let day_offset = Duration::days(i * 3);
+        let out = tools::store::handle(
+            &h.pool,
+            h.embedder.clone(),
+            StoreArgs {
+                profile: h.profile.clone(),
+                content: format!("Josh uses 4-space indent — observation {i}"),
+                idempotency_key: format!("two-cluster-indent-{i}"),
+                event_time: Some(base_time + day_offset),
+                tags: None,
+                metadata: None,
+                memory_type: Some("observation".into()),
+                external_refs: None,
+                facets: Facets::default(),
+                confidence: None,
+                source: None,
+                derivations: None,
+            },
+        )
+        .await
+        .unwrap();
+        stored_ids.push(out.id);
+    }
+
+    for (i, id) in stored_ids.iter().enumerate() {
+        let record_time = base_time + Duration::days((i % 6) as i64 * 3);
+        sqlx::query("UPDATE memories SET record_time = $1 WHERE id = $2")
+            .bind(record_time)
+            .bind(id)
+            .execute(&h.pool)
+            .await
+            .unwrap();
+    }
+
+    let rows: Vec<db::MemoryRow> = {
+        let mut v = Vec::new();
+        for id in &stored_ids {
+            v.push(
+                db::get_memory_by_id(&h.pool, &h.profile, *id)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+        }
+        v
+    };
+
+    let llm = TwoClusterFixtureLlm {
+        existing_claim: "Josh prefers tabs over spaces".into(),
+    };
+
+    let result = synthesis::run_synthesis(
+        &h.pool,
+        &h.embedder,
+        &llm,
+        &h.profile,
+        &rows,
+        Utc::now(),
+    )
+    .await
+    .unwrap();
+
+    // Both clusters emitted, but only the first should supersede
+    assert_eq!(result.clusters_emitted, 2);
+    assert_eq!(
+        result.supersessions, 1,
+        "only first cluster should supersede the old memory"
+    );
+
+    // The old memory should be superseded exactly once
+    let old_row = db::get_memory_by_id(&h.pool, &h.profile, old_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(old_row.superseded_by.is_some());
+}
