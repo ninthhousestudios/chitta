@@ -403,7 +403,7 @@ async fn search_max_tokens_triggers_truncated_with_honest_total() {
             exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
-            include_raw: None,
+            include_raw: Some(true),
         },
     )
     .await
@@ -529,7 +529,7 @@ async fn search_snippet_is_verbatim_prefix() {
             exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
-            include_raw: None,
+            include_raw: Some(true),
         },
     )
     .await
@@ -728,7 +728,7 @@ async fn search_finds_stored_memory_by_semantic_similarity() {
             exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
-            include_raw: None,
+            include_raw: Some(true),
         },
     )
     .await
@@ -905,10 +905,7 @@ async fn update_memory_requires_at_least_one_field() {
 
     match &err {
         ChittaError::InvalidArgument { argument, .. } => {
-            assert!(
-                argument.contains("content") || argument.contains("tags"),
-                "error should mention content/tags, got: {argument}"
-            );
+            assert_eq!(argument, "fields", "expected argument='fields', got: {argument}");
         }
         other => panic!("expected InvalidArgument, got {other:?}"),
     }
@@ -1227,7 +1224,7 @@ async fn search_with_tag_filter_returns_only_matching() {
             exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
-            include_raw: None,
+            include_raw: Some(true),
         },
     )
     .await
@@ -1461,7 +1458,7 @@ async fn search_memory_types_filter_excludes_non_matching() {
     let h = require_harness!("mt_filter");
 
     for (key, content, mt) in [
-        ("f-1", "The sun is a star.", "memory"),
+        ("f-1", "The sun is a star.", "observation"),
         (
             "f-2",
             "Josh corrected the approach — prefers benchmarks first.",
@@ -1470,7 +1467,7 @@ async fn search_memory_types_filter_excludes_non_matching() {
         (
             "f-3",
             "Decided to use RRF with k=60 for retrieval.",
-            "decision",
+            "trait",
         ),
     ] {
         tools::store::handle(
@@ -1509,7 +1506,7 @@ async fn search_memory_types_filter_excludes_non_matching() {
             tags: None,
             min_similarity: None,
             include_content: None,
-            memory_types: Some(vec!["decision".into()]),
+            memory_types: Some(vec!["trait".into()]),
             exclude_invalidated: None,
             exclude_superseded: None,
             ref_filter: None,
@@ -1522,11 +1519,11 @@ async fn search_memory_types_filter_excludes_non_matching() {
 
     for hit in &out.results {
         assert_eq!(
-            hit.memory_type, "decision",
-            "filter should exclude non-decision types"
+            hit.memory_type, "trait",
+            "filter should exclude non-trait types"
         );
     }
-    assert!(!out.results.is_empty(), "should find at least one decision");
+    assert!(!out.results.is_empty(), "should find at least one trait");
 }
 
 #[tokio::test]
@@ -1607,7 +1604,7 @@ async fn search_returns_score_and_similarity() {
             exclude_superseded: None,
             ref_filter: None,
             applies_to: None,
-            include_raw: None,
+            include_raw: Some(true),
         },
     )
     .await
@@ -3285,7 +3282,10 @@ async fn feedback_disagree_drops_confidence() {
         row.reinforcement_count, 0,
         "disagree should not increment reinforcement_count"
     );
-    assert!(row.last_reinforced_at.is_some());
+    assert!(
+        row.last_reinforced_at.is_none(),
+        "disagree should not reset the decay anchor"
+    );
 }
 
 #[tokio::test]
@@ -3443,8 +3443,13 @@ async fn feedback_rejects_invalidated_memory() {
     .unwrap_err();
 
     match err {
-        ChittaError::NotFound { .. } => {}
-        other => panic!("expected NotFound for deleted memory, got: {other:?}"),
+        ChittaError::InvalidArgument { constraint, .. } => {
+            assert!(
+                constraint.contains("superseded or invalidated"),
+                "expected superseded/invalidated constraint, got: {constraint}"
+            );
+        }
+        other => panic!("expected InvalidArgument for deleted memory, got: {other:?}"),
     }
 }
 
