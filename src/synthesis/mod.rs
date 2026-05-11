@@ -96,6 +96,35 @@ pub struct SupersessionResult {
     pub idempotent_replay: bool,
 }
 
+const PRE_FILTER_TOP_K: usize = 10;
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
+    }
+    dot / (norm_a * norm_b)
+}
+
+fn pre_filter_existing<'a>(
+    claim_embedding: &[f32],
+    existing: &'a [MemoryRow],
+    top_k: usize,
+) -> Vec<&'a MemoryRow> {
+    let mut scored: Vec<(f32, &MemoryRow)> = existing
+        .iter()
+        .filter_map(|row| {
+            let emb = row.embedding.as_ref()?;
+            let sim = cosine_similarity(claim_embedding, emb.as_slice());
+            Some((sim, row))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored.into_iter().take(top_k).map(|(_, row)| row).collect()
+}
+
 pub struct SynthesisResult {
     pub clusters_formed: usize,
     pub clusters_emitted: usize,
@@ -151,11 +180,20 @@ pub async fn run_synthesis(
             continue;
         }
 
-        let active_existing: Vec<&MemoryRow> = existing
+        let claim_embedding = embedder
+            .embed_full(&cluster.representative_claim, "reflect")
+            .await?;
+
+        let active_existing: Vec<MemoryRow> = existing
             .iter()
             .filter(|r| !superseded_ids.contains(&r.id))
+            .cloned()
             .collect();
-        let active_refs: Vec<MemoryRow> = active_existing.into_iter().cloned().collect();
+        let active_refs: Vec<MemoryRow> =
+            pre_filter_existing(&claim_embedding.dense, &active_existing, PRE_FILTER_TOP_K)
+                .into_iter()
+                .cloned()
+                .collect();
 
         let contradiction =
             detect_contradiction(llm, &cluster.representative_claim, &active_refs).await?;
@@ -169,12 +207,15 @@ pub async fn run_synthesis(
         let source_facets = Facets::distinct_union(&source_facet_list);
 
         if let Some(c) = contradiction {
-            emit_with_supersession(pool, embedder, cluster, &c, profile, now, source_facets)
-                .await?;
+            emit_with_supersession(
+                pool, embedder, &claim_embedding, cluster, &c, profile, now, source_facets,
+            )
+            .await?;
             superseded_ids.insert(c.existing_id);
             result.supersessions += 1;
         } else {
-            emit_consolidated(pool, embedder, cluster, profile, now, source_facets).await?;
+            emit_consolidated(pool, &claim_embedding, cluster, profile, now, source_facets)
+                .await?;
         }
         result.clusters_emitted += 1;
     }
@@ -263,5 +304,100 @@ pub(crate) mod test_support {
             last_reinforced_at: None,
             invalidated_at: None,
         }
+    }
+
+    pub fn make_consolidated_row_with_embedding(
+        id: Uuid,
+        content: &str,
+        memory_type: &str,
+        embedding: Vec<f32>,
+    ) -> MemoryRow {
+        let mut row = make_consolidated_row(id, content, memory_type);
+        row.embedding = Some(pgvector::Vector::from(embedding));
+        row
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::test_support::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn cosine_similarity_identical_vectors() {
+        let a = vec![1.0, 0.0, 0.0];
+        let sim = cosine_similarity(&a, &a);
+        assert!((sim - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cosine_similarity_orthogonal_vectors() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0];
+        let sim = cosine_similarity(&a, &b);
+        assert!(sim.abs() < 1e-6);
+    }
+
+    #[test]
+    fn cosine_similarity_zero_vector_returns_zero() {
+        let a = vec![1.0, 2.0, 3.0];
+        let b = vec![0.0, 0.0, 0.0];
+        assert_eq!(cosine_similarity(&a, &b), 0.0);
+    }
+
+    #[test]
+    fn pre_filter_returns_top_k_most_similar() {
+        let claim = vec![1.0, 0.0, 0.0];
+
+        let rows = vec![
+            make_consolidated_row_with_embedding(
+                Uuid::now_v7(), "orthogonal", "trait", vec![0.0, 1.0, 0.0],
+            ),
+            make_consolidated_row_with_embedding(
+                Uuid::now_v7(), "very similar", "trait", vec![0.9, 0.1, 0.0],
+            ),
+            make_consolidated_row_with_embedding(
+                Uuid::now_v7(), "somewhat similar", "trait", vec![0.5, 0.5, 0.0],
+            ),
+        ];
+
+        let filtered = pre_filter_existing(&claim, &rows, 2);
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].content, "very similar");
+        assert_eq!(filtered[1].content, "somewhat similar");
+    }
+
+    #[test]
+    fn pre_filter_skips_rows_without_embedding() {
+        let claim = vec![1.0, 0.0, 0.0];
+
+        let rows = vec![
+            make_consolidated_row(Uuid::now_v7(), "no embedding", "trait"),
+            make_consolidated_row_with_embedding(
+                Uuid::now_v7(), "has embedding", "trait", vec![1.0, 0.0, 0.0],
+            ),
+        ];
+
+        let filtered = pre_filter_existing(&claim, &rows, 10);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].content, "has embedding");
+    }
+
+    #[test]
+    fn pre_filter_returns_all_when_fewer_than_k() {
+        let claim = vec![1.0, 0.0, 0.0];
+
+        let rows = vec![
+            make_consolidated_row_with_embedding(
+                Uuid::now_v7(), "a", "trait", vec![1.0, 0.0, 0.0],
+            ),
+            make_consolidated_row_with_embedding(
+                Uuid::now_v7(), "b", "trait", vec![0.5, 0.5, 0.0],
+            ),
+        ];
+
+        let filtered = pre_filter_existing(&claim, &rows, 10);
+        assert_eq!(filtered.len(), 2);
     }
 }

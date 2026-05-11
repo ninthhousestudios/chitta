@@ -67,18 +67,14 @@ fn cluster_idem_key(cluster: &Cluster) -> String {
 
 pub async fn emit_consolidated(
     pool: &PgPool,
-    embedder: &Arc<Embedder>,
+    claim_embedding: &crate::embedding::EmbedOutput,
     cluster: &Cluster,
     profile: &str,
     now: DateTime<Utc>,
     source_facets: Facets,
 ) -> Result<(MemoryRow, bool)> {
-    let embed_out = embedder
-        .embed_full(&cluster.representative_claim, "reflect")
-        .await?;
-
     let row = embed_and_build(
-        &embed_out,
+        claim_embedding,
         profile,
         cluster.representative_claim.clone(),
         cluster_idem_key(cluster),
@@ -101,6 +97,7 @@ pub async fn emit_consolidated(
 pub async fn emit_with_supersession(
     pool: &PgPool,
     embedder: &Arc<Embedder>,
+    claim_embedding: &crate::embedding::EmbedOutput,
     cluster: &Cluster,
     contradiction: &Contradiction,
     profile: &str,
@@ -108,7 +105,8 @@ pub async fn emit_with_supersession(
     source_facets: Facets,
 ) -> Result<SupersessionResult> {
     let (new_row, idempotent_replay) =
-        emit_consolidated(pool, embedder, cluster, profile, now, source_facets.clone()).await?;
+        emit_consolidated(pool, claim_embedding, cluster, profile, now, source_facets.clone())
+            .await?;
 
     let old_row = db::get_memory_by_id(pool, profile, contradiction.existing_id).await?;
     let already_superseded = old_row.as_ref().and_then(|r| r.superseded_by).is_some();
