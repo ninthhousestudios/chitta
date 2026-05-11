@@ -3703,6 +3703,18 @@ async fn synthesis_cluster_and_emit() {
         stored_ids.push(out.id);
     }
 
+    // Backdate record_time so rows span multiple days (store::handle sets
+    // record_time=now, but the threshold checks distinct days by record_time).
+    for (i, id) in stored_ids.iter().enumerate() {
+        let record_time = base_time + Duration::days(i as i64 * 3);
+        sqlx::query("UPDATE memories SET record_time = $1 WHERE id = $2")
+            .bind(record_time)
+            .bind(id)
+            .execute(&h.pool)
+            .await
+            .unwrap();
+    }
+
     let rows: Vec<db::MemoryRow> = {
         let mut v = Vec::new();
         for id in &stored_ids {
