@@ -1,10 +1,18 @@
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+use pgvector::Vector;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::db::MemoryRow;
+use crate::db::{self, MemoryRow};
+use crate::embedding::Embedder;
 use crate::error::{ChittaError, Result};
+use crate::facets::Facets;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Candidate {
@@ -92,6 +100,210 @@ fn strip_markdown_fences(s: &str) -> &str {
     let s = s.strip_prefix("```json").or_else(|| s.strip_prefix("```")).unwrap_or(s);
     let s = s.strip_suffix("```").unwrap_or(s);
     s.trim()
+}
+
+// ── clustering ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Cluster {
+    pub representative_claim: String,
+    pub memory_type: String,
+    pub source_ids: Vec<Uuid>,
+}
+
+const CLUSTER_SYSTEM_PROMPT: &str = "\
+You group candidate claims about a person by semantic similarity. \
+Claims expressing the same underlying trait, value, pattern, preference, \
+or mental model — even if worded differently — belong in the same cluster. \
+For each cluster, pick the single best representative claim and the most \
+appropriate memory_type. Return a JSON array. Each element: \
+{\"representative_claim\": \"<best wording>\", \"memory_type\": \"<trait|value|pattern|preference|mental_model>\", \
+\"member_indices\": [0, 1, ...]}. \
+Every candidate index must appear in exactly one cluster. \
+Return ONLY the JSON array, no markdown fences, no commentary.";
+
+fn cluster_user_prompt(candidates: &[Candidate]) -> String {
+    let mut lines = Vec::with_capacity(candidates.len() + 1);
+    lines.push("Candidates:".to_string());
+    for (i, c) in candidates.iter().enumerate() {
+        lines.push(format!("[{i}] ({}) {}", c.memory_type, c.claim));
+    }
+    lines.join("\n")
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCluster {
+    representative_claim: String,
+    memory_type: String,
+    member_indices: Vec<usize>,
+}
+
+pub async fn cluster_candidates(
+    llm: &(impl Llm + ?Sized),
+    candidates: &[Candidate],
+) -> Result<Vec<Cluster>> {
+    if candidates.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let user = cluster_user_prompt(candidates);
+    let response = llm.complete(CLUSTER_SYSTEM_PROMPT, &user).await?;
+    parse_cluster_response(&response, candidates)
+}
+
+fn parse_cluster_response(response: &str, candidates: &[Candidate]) -> Result<Vec<Cluster>> {
+    let json_str = strip_markdown_fences(response.trim());
+
+    let raw: Vec<RawCluster> = serde_json::from_str(json_str).map_err(|e| {
+        ChittaError::Internal(format!("LLM returned unparseable cluster JSON: {e}"))
+    })?;
+
+    let clusters = raw
+        .into_iter()
+        .filter_map(|rc| {
+            if !VALID_TYPES.contains(&rc.memory_type.as_str()) {
+                tracing::warn!(memory_type = %rc.memory_type, "cluster has invalid memory_type, skipping");
+                return None;
+            }
+            if rc.representative_claim.is_empty() {
+                return None;
+            }
+
+            let source_ids: Vec<Uuid> = rc
+                .member_indices
+                .iter()
+                .filter_map(|&i| candidates.get(i))
+                .map(|c| c.source_id)
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect();
+
+            if source_ids.is_empty() {
+                return None;
+            }
+
+            Some(Cluster {
+                representative_claim: rc.representative_claim,
+                memory_type: rc.memory_type,
+                source_ids,
+            })
+        })
+        .collect();
+
+    Ok(clusters)
+}
+
+// ── threshold ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct ThresholdConfig {
+    pub min_cluster_size: usize,
+    pub min_distinct_days: usize,
+    pub max_source_age_days: i64,
+}
+
+impl Default for ThresholdConfig {
+    fn default() -> Self {
+        Self {
+            min_cluster_size: 5,
+            min_distinct_days: 2,
+            max_source_age_days: 90,
+        }
+    }
+}
+
+pub fn check_threshold(
+    cluster: &Cluster,
+    source_times: &HashMap<Uuid, DateTime<Utc>>,
+    now: DateTime<Utc>,
+    config: &ThresholdConfig,
+) -> bool {
+    if cluster.source_ids.len() < config.min_cluster_size {
+        return false;
+    }
+
+    let times: Vec<&DateTime<Utc>> = cluster
+        .source_ids
+        .iter()
+        .filter_map(|id| source_times.get(id))
+        .collect();
+
+    let distinct_days: HashSet<chrono::NaiveDate> =
+        times.iter().map(|t| t.date_naive()).collect();
+    if distinct_days.len() < config.min_distinct_days {
+        return false;
+    }
+
+    let cutoff = now - chrono::Duration::days(config.max_source_age_days);
+    times.iter().any(|&&t| t >= cutoff)
+}
+
+// ── emission ────────────────────────────────────────────────────────
+
+pub fn emission_confidence(cluster_size: usize) -> f32 {
+    (0.50 + 0.05 * cluster_size as f32).min(0.90)
+}
+
+pub async fn emit_consolidated(
+    pool: &PgPool,
+    embedder: &Arc<Embedder>,
+    cluster: &Cluster,
+    profile: &str,
+    now: DateTime<Utc>,
+) -> Result<(MemoryRow, bool)> {
+    let confidence = emission_confidence(cluster.source_ids.len());
+    let id = Uuid::now_v7();
+
+    let mut sorted_ids = cluster.source_ids.clone();
+    sorted_ids.sort();
+    let key_material = format!(
+        "reflect:{}:{}",
+        cluster.representative_claim,
+        sorted_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let hash = Sha256::digest(key_material.as_bytes());
+    let idem_key = format!(
+        "reflect-{:x}{:x}{:x}{:x}{:x}{:x}{:x}{:x}",
+        hash[0], hash[1], hash[2], hash[3], hash[4], hash[5], hash[6], hash[7]
+    );
+
+    let embed_out = embedder.embed_full(&cluster.representative_claim, "reflect").await?;
+    let sparse_json = serde_json::to_value(&embed_out.sparse)
+        .map_err(|e| ChittaError::Internal(format!("sparse serialization: {e}")))?;
+
+    let row = MemoryRow {
+        id,
+        profile: profile.to_string(),
+        content: cluster.representative_claim.clone(),
+        embedding: Some(Vector::from(embed_out.dense)),
+        sparse_embedding: Some(sparse_json),
+        event_time: now,
+        record_time: now,
+        idempotency_key: idem_key,
+        source: Some("reflect".into()),
+        memory_type: cluster.memory_type.clone(),
+        tags: vec!["reflect".into(), "synthesised".into()],
+        external_refs: None,
+        metadata: None,
+        facets: Facets::default(),
+        superseded_by: None,
+        confidence: Some(confidence),
+        reinforcement_count: 0,
+        last_reinforced_at: None,
+        invalidated_at: None,
+    };
+
+    let derivations: Vec<(Uuid, String)> = cluster
+        .source_ids
+        .iter()
+        .map(|&sid| (sid, "synthesised_from".into()))
+        .collect();
+
+    db::insert_memory_with_derivations(pool, &row, &derivations).await
 }
 
 #[cfg(test)]
@@ -290,5 +502,185 @@ mod tests {
         let result = extract_candidates(&llm, &rows).await.unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].source_id, id1);
+    }
+
+    // ── clustering tests ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn cluster_empty_candidates() {
+        let llm = MockLlm::new(vec![]);
+        let result = cluster_candidates(&llm, &[]).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cluster_groups_similar_claims() {
+        let ids: Vec<Uuid> = (0..6).map(|_| Uuid::now_v7()).collect();
+        let candidates = vec![
+            Candidate { memory_type: "preference".into(), claim: "Josh prefers Rust".into(), source_id: ids[0] },
+            Candidate { memory_type: "preference".into(), claim: "Josh likes Rust for systems".into(), source_id: ids[1] },
+            Candidate { memory_type: "preference".into(), claim: "Josh chooses Rust".into(), source_id: ids[2] },
+            Candidate { memory_type: "value".into(), claim: "Josh values simplicity".into(), source_id: ids[3] },
+            Candidate { memory_type: "value".into(), claim: "Josh prefers simple designs".into(), source_id: ids[4] },
+            Candidate { memory_type: "value".into(), claim: "Josh avoids complexity".into(), source_id: ids[5] },
+        ];
+
+        let llm = MockLlm::new(vec![r#"[
+            {"representative_claim": "Josh prefers Rust for systems programming", "memory_type": "preference", "member_indices": [0, 1, 2]},
+            {"representative_claim": "Josh values simplicity in design", "memory_type": "value", "member_indices": [3, 4, 5]}
+        ]"#]);
+
+        let clusters = cluster_candidates(&llm, &candidates).await.unwrap();
+        assert_eq!(clusters.len(), 2);
+        assert_eq!(clusters[0].representative_claim, "Josh prefers Rust for systems programming");
+        assert_eq!(clusters[0].memory_type, "preference");
+        assert_eq!(clusters[0].source_ids.len(), 3);
+        assert_eq!(clusters[1].memory_type, "value");
+    }
+
+    #[tokio::test]
+    async fn cluster_deduplicates_source_ids() {
+        let id = Uuid::now_v7();
+        let candidates = vec![
+            Candidate { memory_type: "trait".into(), claim: "claim A".into(), source_id: id },
+            Candidate { memory_type: "trait".into(), claim: "claim B".into(), source_id: id },
+        ];
+
+        let llm = MockLlm::new(vec![
+            r#"[{"representative_claim": "merged claim", "memory_type": "trait", "member_indices": [0, 1]}]"#,
+        ]);
+
+        let clusters = cluster_candidates(&llm, &candidates).await.unwrap();
+        assert_eq!(clusters.len(), 1);
+        assert_eq!(clusters[0].source_ids.len(), 1, "same source_id should be deduplicated");
+    }
+
+    #[tokio::test]
+    async fn cluster_filters_invalid_memory_type() {
+        let id = Uuid::now_v7();
+        let candidates = vec![
+            Candidate { memory_type: "trait".into(), claim: "a claim".into(), source_id: id },
+        ];
+
+        let llm = MockLlm::new(vec![
+            r#"[{"representative_claim": "a claim", "memory_type": "observation", "member_indices": [0]}]"#,
+        ]);
+
+        let clusters = cluster_candidates(&llm, &candidates).await.unwrap();
+        assert!(clusters.is_empty(), "observation is not a valid consolidated type");
+    }
+
+    // ── threshold tests ─────────────────────────────────────────────
+
+    fn make_source_times(ids: &[Uuid], times: &[DateTime<Utc>]) -> HashMap<Uuid, DateTime<Utc>> {
+        ids.iter().copied().zip(times.iter().copied()).collect()
+    }
+
+    fn utc(year: i32, month: u32, day: u32) -> DateTime<Utc> {
+        chrono::NaiveDate::from_ymd_opt(year, month, day)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+    }
+
+    fn make_cluster(source_ids: Vec<Uuid>) -> Cluster {
+        Cluster {
+            representative_claim: "test claim".into(),
+            memory_type: "trait".into(),
+            source_ids,
+        }
+    }
+
+    #[test]
+    fn threshold_below_size() {
+        let ids: Vec<Uuid> = (0..4).map(|_| Uuid::now_v7()).collect();
+        let now = utc(2026, 5, 11);
+        let times: Vec<DateTime<Utc>> = vec![
+            utc(2026, 5, 1), utc(2026, 5, 2), utc(2026, 5, 3), utc(2026, 5, 4),
+        ];
+        let cluster = make_cluster(ids.clone());
+        let source_times = make_source_times(&ids, &times);
+
+        assert!(!check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
+            "4 sources should fail size>=5");
+    }
+
+    #[test]
+    fn threshold_exactly_at_size() {
+        let ids: Vec<Uuid> = (0..5).map(|_| Uuid::now_v7()).collect();
+        let now = utc(2026, 5, 11);
+        let times: Vec<DateTime<Utc>> = vec![
+            utc(2026, 5, 1), utc(2026, 5, 2), utc(2026, 5, 3),
+            utc(2026, 5, 4), utc(2026, 5, 5),
+        ];
+        let cluster = make_cluster(ids.clone());
+        let source_times = make_source_times(&ids, &times);
+
+        assert!(check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
+            "exactly 5 sources across 5 days with recent data should pass");
+    }
+
+    #[test]
+    fn threshold_fails_distinct_days() {
+        let ids: Vec<Uuid> = (0..5).map(|_| Uuid::now_v7()).collect();
+        let now = utc(2026, 5, 11);
+        let same_day = utc(2026, 5, 10);
+        let times = vec![same_day; 5];
+        let cluster = make_cluster(ids.clone());
+        let source_times = make_source_times(&ids, &times);
+
+        assert!(!check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
+            "all sources on same day should fail distinct_days>=2");
+    }
+
+    #[test]
+    fn threshold_fails_recency() {
+        let ids: Vec<Uuid> = (0..5).map(|_| Uuid::now_v7()).collect();
+        let now = utc(2026, 5, 11);
+        let times: Vec<DateTime<Utc>> = vec![
+            utc(2025, 1, 1), utc(2025, 1, 2), utc(2025, 1, 3),
+            utc(2025, 1, 4), utc(2025, 1, 5),
+        ];
+        let cluster = make_cluster(ids.clone());
+        let source_times = make_source_times(&ids, &times);
+
+        assert!(!check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
+            "all sources older than 90 days should fail recency check");
+    }
+
+    #[test]
+    fn threshold_happy_path() {
+        let ids: Vec<Uuid> = (0..7).map(|_| Uuid::now_v7()).collect();
+        let now = utc(2026, 5, 11);
+        let times: Vec<DateTime<Utc>> = vec![
+            utc(2025, 12, 1), utc(2025, 12, 15), utc(2026, 1, 10),
+            utc(2026, 3, 5), utc(2026, 4, 20), utc(2026, 5, 1), utc(2026, 5, 10),
+        ];
+        let cluster = make_cluster(ids.clone());
+        let source_times = make_source_times(&ids, &times);
+
+        assert!(check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
+            "7 sources across many days with recent entries should pass all checks");
+    }
+
+    // ── confidence tests ────────────────────────────────────────────
+
+    #[test]
+    fn confidence_at_min_cluster() {
+        assert!((emission_confidence(5) - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn confidence_scales_with_size() {
+        assert!((emission_confidence(6) - 0.80).abs() < 1e-6);
+        assert!((emission_confidence(7) - 0.85).abs() < 1e-6);
+    }
+
+    #[test]
+    fn confidence_caps_at_090() {
+        assert!((emission_confidence(8) - 0.90).abs() < 1e-6);
+        assert!((emission_confidence(20) - 0.90).abs() < 1e-6);
+        assert!((emission_confidence(100) - 0.90).abs() < 1e-6);
     }
 }

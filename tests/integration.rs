@@ -21,15 +21,17 @@
 //! `TEST_DATABASE_URL` is unset or the model files are missing — so
 //! `cargo test` in CI-lite mode still runs unit + contract suites.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use chrono::{DateTime, Duration, Utc};
 use chitta::config::{Config, SearchConfig};
 use chitta::db;
 use chitta::embedding::Embedder;
 use chitta::error::ChittaError;
 use chitta::facets::Facets;
-use chitta::synthesis::{self, Llm};
+use chitta::synthesis::{self, Llm, ThresholdConfig};
 use chitta::tools::{
     self, AppliesTo, DeleteArgs, FeedbackKind, GetArgs, GetProfileArgs, ListArgs,
     RecordFeedbackArgs, ReflectStatusArgs, SearchArgs, StoreArgs, SupersedeArgs, UpdateArgs,
@@ -3640,4 +3642,148 @@ async fn synthesis_extract_candidates_smoke() {
 
     assert_eq!(candidates[2].memory_type, "pattern");
     assert_eq!(candidates[2].source_id, out2.id);
+}
+
+// ---- synthesis cluster + emit ----------------------------------------
+
+struct ClusterFixtureLlm;
+
+impl ClusterFixtureLlm {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl Llm for ClusterFixtureLlm {
+    async fn complete(&self, system: &str, user: &str) -> chitta::error::Result<String> {
+        if system.contains("extract consolidated claims") {
+            Ok(r#"[{"memory_type": "preference", "claim": "Josh prefers Rust for systems work"}]"#.into())
+        } else if system.contains("group candidate claims") {
+            let count = user.lines().filter(|l| l.starts_with('[')).count();
+            let indices: Vec<usize> = (0..count).collect();
+            let indices_json = serde_json::to_string(&indices).unwrap();
+            Ok(format!(
+                r#"[{{"representative_claim": "Josh prefers Rust for systems programming", "memory_type": "preference", "member_indices": {indices_json}}}]"#
+            ))
+        } else {
+            Ok("[]".into())
+        }
+    }
+}
+
+#[tokio::test]
+async fn synthesis_cluster_and_emit() {
+    let h = require_harness!("synth_cluster");
+
+    let base_time = Utc::now() - Duration::days(30);
+    let mut stored_ids = Vec::new();
+
+    for i in 0..6 {
+        let day_offset = Duration::days(i * 3);
+        let out = tools::store::handle(
+            &h.pool,
+            h.embedder.clone(),
+            StoreArgs {
+                profile: h.profile.clone(),
+                content: format!("Josh prefers Rust for systems work — observation {i}"),
+                idempotency_key: format!("cluster-obs-{i}"),
+                event_time: Some(base_time + day_offset),
+                tags: None,
+                metadata: None,
+                memory_type: Some("observation".into()),
+                external_refs: None,
+                facets: Facets::default(),
+                confidence: None,
+                source: None,
+                derivations: None,
+            },
+        )
+        .await
+        .unwrap();
+        stored_ids.push(out.id);
+    }
+
+    let rows: Vec<db::MemoryRow> = {
+        let mut v = Vec::new();
+        for id in &stored_ids {
+            v.push(
+                db::get_memory_by_id(&h.pool, &h.profile, *id)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+        }
+        v
+    };
+
+    let llm = ClusterFixtureLlm::new();
+
+    let candidates = synthesis::extract_candidates(&llm, &rows).await.unwrap();
+    assert_eq!(candidates.len(), 6);
+
+    let clusters = synthesis::cluster_candidates(&llm, &candidates).await.unwrap();
+    assert_eq!(clusters.len(), 1, "all similar claims should form one cluster");
+    assert_eq!(clusters[0].source_ids.len(), 6);
+
+    let source_times: HashMap<Uuid, DateTime<Utc>> = rows
+        .iter()
+        .map(|r| (r.id, r.record_time))
+        .collect();
+
+    let config = ThresholdConfig::default();
+    assert!(
+        synthesis::check_threshold(&clusters[0], &source_times, Utc::now(), &config),
+        "6 sources across 6 different days with recent data should pass"
+    );
+
+    let confidence = synthesis::emission_confidence(clusters[0].source_ids.len());
+    assert!(
+        (confidence - 0.80).abs() < 1e-6,
+        "min(0.90, 0.50 + 0.05*6) = 0.80"
+    );
+
+    let (emitted, replayed) = synthesis::emit_consolidated(
+        &h.pool,
+        &h.embedder,
+        &clusters[0],
+        &h.profile,
+        Utc::now(),
+    )
+    .await
+    .unwrap();
+
+    assert!(!replayed, "first emission should not be a replay");
+    assert_eq!(emitted.memory_type, "preference");
+    assert!(
+        (emitted.confidence.unwrap() - 0.80).abs() < 1e-6,
+        "emitted confidence should match formula"
+    );
+    assert_eq!(emitted.source.as_deref(), Some("reflect"));
+    assert!(emitted.tags.contains(&"synthesised".to_string()));
+
+    let derivations = db::get_derivations_for(&h.pool, emitted.id).await.unwrap();
+    assert_eq!(
+        derivations.len(),
+        6,
+        "one derivation per source row"
+    );
+    for d in &derivations {
+        assert_eq!(d.derivation_type, "synthesised_from");
+        assert!(
+            stored_ids.contains(&d.source_id),
+            "derivation should point to a source row"
+        );
+    }
+
+    // Idempotency: re-emit the same cluster → replay
+    let (_, replayed2) = synthesis::emit_consolidated(
+        &h.pool,
+        &h.embedder,
+        &clusters[0],
+        &h.profile,
+        Utc::now(),
+    )
+    .await
+    .unwrap();
+    assert!(replayed2, "second emission of same cluster should be idempotent replay");
 }
