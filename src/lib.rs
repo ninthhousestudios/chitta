@@ -11,6 +11,7 @@ pub mod envelope;
 pub mod error;
 pub mod facets;
 pub mod ingest;
+pub mod llm;
 pub mod mcp;
 pub mod retrieval;
 pub mod synthesis;

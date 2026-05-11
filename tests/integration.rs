@@ -4322,3 +4322,134 @@ async fn synthesis_two_clusters_same_target_only_first_supersedes() {
         .unwrap();
     assert!(old_row.superseded_by.is_some());
 }
+
+// ---- reflect pipeline (chitta/40) ------------------------------------
+
+struct ReflectFixtureLlm;
+
+impl Llm for ReflectFixtureLlm {
+    async fn complete(&self, system: &str, _user: &str) -> chitta::error::Result<String> {
+        if system.contains("extract consolidated claims") {
+            Ok(
+                r#"[{"memory_type": "preference", "claim": "Josh prefers concise code"}]"#.into(),
+            )
+        } else if system.contains("group candidate claims") {
+            Ok(
+                r#"[{"representative_claim": "Josh prefers concise code", "memory_type": "preference", "member_indices": [0, 1, 2, 3, 4, 5]}]"#.into(),
+            )
+        } else if system.contains("detect contradictions") {
+            Ok(r#"{"contradicts_index": null}"#.into())
+        } else {
+            Ok(r#"{"contradicts_index": null}"#.into())
+        }
+    }
+}
+
+#[tokio::test]
+async fn reflect_pipeline_end_to_end() {
+    let h = require_harness!("reflect_pipeline");
+
+    // No prior reflect run should exist
+    let last = db::last_reflect_run(&h.pool, &h.profile).await.unwrap();
+    assert!(last.is_none());
+
+    // Seed 6 observations across multiple days to pass threshold
+    let base_time = Utc::now() - Duration::days(30);
+    let mut stored_ids = Vec::new();
+
+    for i in 0..6 {
+        let day_offset = Duration::days(i * 3);
+        let out = tools::store::handle(
+            &h.pool,
+            h.embedder.clone(),
+            StoreArgs {
+                profile: h.profile.clone(),
+                content: format!("Josh prefers concise code — observation {i}"),
+                idempotency_key: format!("reflect-pipe-{i}"),
+                event_time: Some(base_time + day_offset),
+                tags: None,
+                metadata: None,
+                memory_type: Some("observation".into()),
+                external_refs: None,
+                facets: Facets::default(),
+                confidence: None,
+                source: None,
+                derivations: None,
+            },
+        )
+        .await
+        .unwrap();
+        stored_ids.push(out.id);
+    }
+
+    // Backdate record_time so rows span multiple days
+    for (i, id) in stored_ids.iter().enumerate() {
+        let record_time = base_time + Duration::days(i as i64 * 3);
+        sqlx::query("UPDATE memories SET record_time = $1 WHERE id = $2")
+            .bind(record_time)
+            .bind(id)
+            .execute(&h.pool)
+            .await
+            .unwrap();
+    }
+
+    // Fetch rows the same way the reflect subcommand does
+    let since = None; // first run — all time
+    let rows = db::fetch_raw_since(&h.pool, &h.profile, since)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 6);
+
+    // Run synthesis with ReflectFixtureLlm
+    let llm = ReflectFixtureLlm;
+    let result = synthesis::run_synthesis(
+        &h.pool,
+        &h.embedder,
+        &llm,
+        &h.profile,
+        &rows,
+        Utc::now(),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        result.clusters_formed >= 1,
+        "expected at least 1 cluster, got {}",
+        result.clusters_formed
+    );
+
+    // Write run marker
+    let summary = serde_json::json!({
+        "clusters_formed": result.clusters_formed,
+        "clusters_emitted": result.clusters_emitted,
+        "supersessions": result.supersessions,
+    });
+    let run_row = db::insert_reflect_run(
+        &h.pool,
+        &h.profile,
+        rows.len() as i32,
+        Some(summary),
+    )
+    .await
+    .unwrap();
+    assert_eq!(run_row.rows_scanned, 6);
+    assert!(run_row.summary.is_some());
+
+    // Verify last_reflect_run now returns the run we just wrote
+    let last = db::last_reflect_run(&h.pool, &h.profile)
+        .await
+        .unwrap()
+        .expect("should have a reflect run");
+    assert_eq!(last.id, run_row.id);
+
+    // A subsequent fetch_raw_since with the run's started_at should return 0 rows
+    let rows2 = db::fetch_raw_since(&h.pool, &h.profile, Some(last.started_at))
+        .await
+        .unwrap();
+    assert!(
+        rows2.is_empty(),
+        "expected 0 rows after reflect run, got {}",
+        rows2.len()
+    );
+}

@@ -3,7 +3,8 @@ name = "chitta"
 version = "0.3.0"
 edition = "2024"
 description = "Working model of Josh — agent-native persistent memory for the manas ecosystem."
-license = "MIT OR Apache-2.0"
+license = "MPL-2.0"
+repository = "https://github.com/ninthhousestudios/manas"
 publish = false
 
 [lib]
@@ -20,7 +21,7 @@ path = "src/bin/chitta-migrate.rs"
 
 [dependencies]
 # Async runtime. De facto standard for Rust network services; needed for stdio I/O + DB pool.
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "io-std", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "io-std", "io-util", "process"] }
 
 # Official MCP SDK. Speaks JSON-RPC protocol + stdio transport; we supply handlers.
 # `schemars` feature exposes the JsonSchema-backed tool-input schema on the wire.
@@ -79,6 +80,13 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["auth"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 sha2 = "0.11.0"
+
+# HTTP client for direct Anthropic API calls (feature-gated behind `api`).
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], optional = true }
+
+[features]
+default = []
+api = ["dep:reqwest"]
 
 [dev-dependencies]
 # Full tokio for integration tests that spawn the binary and drive stdio.
