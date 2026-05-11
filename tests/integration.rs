@@ -13,7 +13,7 @@
 //! ```bash
 //! createdb chitta_test
 //! export TEST_DATABASE_URL=postgres://localhost/chitta_test
-//! # CHITTA_MODEL_PATH defaults to ~/.cache/chitta/bge-m3-onnx
+//! # CHITTA_MODEL_PATH defaults to ~/.chitta/models/bge-m3-onnx
 //! cargo test --test integration
 //! ```
 //!
@@ -85,7 +85,7 @@ async fn try_shared() -> Option<SharedSetup> {
         .unwrap_or_else(|| {
             let home = std::env::var_os("HOME").unwrap_or_default();
             let mut p = PathBuf::from(home);
-            p.push(".cache/chitta/bge-m3-onnx");
+            p.push(".chitta/models/bge-m3-onnx");
             p
         });
 
