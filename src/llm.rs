@@ -43,10 +43,9 @@ impl Llm for ClaudeCliLlm {
             .map_err(|e| ChittaError::Internal(format!("failed to spawn claude CLI: {e}")))?;
 
         if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(user.as_bytes())
-                .await
-                .map_err(|e| ChittaError::Internal(format!("failed to write to claude stdin: {e}")))?;
+            stdin.write_all(user.as_bytes()).await.map_err(|e| {
+                ChittaError::Internal(format!("failed to write to claude stdin: {e}"))
+            })?;
         }
 
         let output = child

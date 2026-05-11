@@ -959,7 +959,10 @@ fn record_feedback_output_serializes_without_correction() {
         correction_row_id: None,
     };
     let wire: Value = serde_json::to_value(&out).unwrap();
-    assert_keys(&wire, &["memory_id", "new_confidence", "kind", "feedback_row_id"]);
+    assert_keys(
+        &wire,
+        &["memory_id", "new_confidence", "kind", "feedback_row_id"],
+    );
     assert!(wire.get("correction_row_id").is_none());
 }
 
@@ -975,7 +978,13 @@ fn record_feedback_output_serializes_with_correction() {
     let wire: Value = serde_json::to_value(&out).unwrap();
     assert_keys(
         &wire,
-        &["memory_id", "new_confidence", "kind", "feedback_row_id", "correction_row_id"],
+        &[
+            "memory_id",
+            "new_confidence",
+            "kind",
+            "feedback_row_id",
+            "correction_row_id",
+        ],
     );
 }
 

@@ -25,7 +25,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, Utc};
 use chitta::config::{Config, SearchConfig};
 use chitta::db;
 use chitta::embedding::Embedder;
@@ -36,6 +35,7 @@ use chitta::tools::{
     self, AppliesTo, DeleteArgs, FeedbackKind, GetArgs, GetProfileArgs, ListArgs,
     RecordFeedbackArgs, ReflectStatusArgs, SearchArgs, StoreArgs, SupersedeArgs, UpdateArgs,
 };
+use chrono::{DateTime, Duration, Utc};
 use sqlx::PgPool;
 use tokio::sync::OnceCell;
 use uuid::Uuid;
@@ -3281,7 +3281,10 @@ async fn feedback_disagree_drops_confidence() {
         .unwrap()
         .unwrap();
     assert!((row.confidence.unwrap() - 0.40).abs() < 0.001);
-    assert_eq!(row.reinforcement_count, 0, "disagree should not increment reinforcement_count");
+    assert_eq!(
+        row.reinforcement_count, 0,
+        "disagree should not increment reinforcement_count"
+    );
     assert!(row.last_reinforced_at.is_some());
 }
 
@@ -3306,22 +3309,24 @@ async fn feedback_disagree_with_correction_writes_both_rows() {
     assert!((result.new_confidence - 0.60).abs() < 0.001);
     assert!(result.correction_row_id.is_some());
 
-    let correction = db::get_memory_by_id(
-        &h.pool,
-        &h.profile,
-        result.correction_row_id.unwrap(),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let correction = db::get_memory_by_id(&h.pool, &h.profile, result.correction_row_id.unwrap())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(correction.memory_type, "observation");
     assert!(correction.tags.contains(&"correction".to_string()));
     assert!(
-        correction.tags.iter().any(|t| t.starts_with("contradicts:")),
+        correction
+            .tags
+            .iter()
+            .any(|t| t.starts_with("contradicts:")),
         "correction should have contradicts:<id> tag"
     );
     assert_eq!(correction.content, "Actually Josh prefers Vim over Emacs");
-    assert!(correction.embedding.is_some(), "correction should be embedded");
+    assert!(
+        correction.embedding.is_some(),
+        "correction should be embedded"
+    );
 }
 
 #[tokio::test]
@@ -3623,15 +3628,28 @@ async fn synthesis_extract_candidates_smoke() {
     .unwrap();
 
     let rows = vec![
-        db::get_memory_by_id(&h.pool, &h.profile, out1.id).await.unwrap().unwrap(),
-        db::get_memory_by_id(&h.pool, &h.profile, out2.id).await.unwrap().unwrap(),
-        db::get_memory_by_id(&h.pool, &h.profile, out3.id).await.unwrap().unwrap(),
+        db::get_memory_by_id(&h.pool, &h.profile, out1.id)
+            .await
+            .unwrap()
+            .unwrap(),
+        db::get_memory_by_id(&h.pool, &h.profile, out2.id)
+            .await
+            .unwrap()
+            .unwrap(),
+        db::get_memory_by_id(&h.pool, &h.profile, out3.id)
+            .await
+            .unwrap()
+            .unwrap(),
     ];
 
     let llm = FixtureLlm;
     let candidates = synthesis::extract_candidates(&llm, &rows).await.unwrap();
 
-    assert_eq!(candidates.len(), 3, "expected 3 candidates from 2 productive rows");
+    assert_eq!(
+        candidates.len(),
+        3,
+        "expected 3 candidates from 2 productive rows"
+    );
 
     assert_eq!(candidates[0].memory_type, "preference");
     assert_eq!(candidates[0].claim, "Josh prefers Rust");
@@ -3657,7 +3675,10 @@ impl ClusterFixtureLlm {
 impl Llm for ClusterFixtureLlm {
     async fn complete(&self, system: &str, user: &str) -> chitta::error::Result<String> {
         if system.contains("extract consolidated claims") {
-            Ok(r#"[{"memory_type": "preference", "claim": "Josh prefers Rust for systems work"}]"#.into())
+            Ok(
+                r#"[{"memory_type": "preference", "claim": "Josh prefers Rust for systems work"}]"#
+                    .into(),
+            )
         } else if system.contains("group candidate claims") {
             let count = user.lines().filter(|l| l.starts_with('[')).count();
             let indices: Vec<usize> = (0..count).collect();
@@ -3733,14 +3754,18 @@ async fn synthesis_cluster_and_emit() {
     let candidates = synthesis::extract_candidates(&llm, &rows).await.unwrap();
     assert_eq!(candidates.len(), 6);
 
-    let clusters = synthesis::cluster_candidates(&llm, &candidates).await.unwrap();
-    assert_eq!(clusters.len(), 1, "all similar claims should form one cluster");
+    let clusters = synthesis::cluster_candidates(&llm, &candidates)
+        .await
+        .unwrap();
+    assert_eq!(
+        clusters.len(),
+        1,
+        "all similar claims should form one cluster"
+    );
     assert_eq!(clusters[0].source_ids.len(), 6);
 
-    let source_times: HashMap<Uuid, DateTime<Utc>> = rows
-        .iter()
-        .map(|r| (r.id, r.record_time))
-        .collect();
+    let source_times: HashMap<Uuid, DateTime<Utc>> =
+        rows.iter().map(|r| (r.id, r.record_time)).collect();
 
     let config = ThresholdConfig::default();
     assert!(
@@ -3760,6 +3785,7 @@ async fn synthesis_cluster_and_emit() {
         &clusters[0],
         &h.profile,
         Utc::now(),
+        chitta::facets::Facets::default(),
     )
     .await
     .unwrap();
@@ -3774,11 +3800,7 @@ async fn synthesis_cluster_and_emit() {
     assert!(emitted.tags.contains(&"synthesised".to_string()));
 
     let derivations = db::get_derivations_for(&h.pool, emitted.id).await.unwrap();
-    assert_eq!(
-        derivations.len(),
-        6,
-        "one derivation per source row"
-    );
+    assert_eq!(derivations.len(), 6, "one derivation per source row");
     for d in &derivations {
         assert_eq!(d.derivation_type, "synthesised_from");
         assert!(
@@ -3794,10 +3816,14 @@ async fn synthesis_cluster_and_emit() {
         &clusters[0],
         &h.profile,
         Utc::now(),
+        chitta::facets::Facets::default(),
     )
     .await
     .unwrap();
-    assert!(replayed2, "second emission of same cluster should be idempotent replay");
+    assert!(
+        replayed2,
+        "second emission of same cluster should be idempotent replay"
+    );
 }
 
 // ---- synthesis contradiction + supersession --------------------------
@@ -3917,16 +3943,10 @@ async fn synthesis_contradiction_and_supersession() {
         existing_claim: "Josh prefers tabs over spaces".into(),
     };
 
-    let result = synthesis::run_synthesis(
-        &h.pool,
-        &h.embedder,
-        &llm,
-        &h.profile,
-        &rows,
-        Utc::now(),
-    )
-    .await
-    .unwrap();
+    let result =
+        synthesis::run_synthesis(&h.pool, &h.embedder, &llm, &h.profile, &rows, Utc::now())
+            .await
+            .unwrap();
 
     assert_eq!(result.clusters_emitted, 1);
     assert_eq!(result.supersessions, 1);
@@ -3967,7 +3987,10 @@ async fn synthesis_contradiction_and_supersession() {
     // 7. Verify meta-observation has derivations linking old and new
     let meta_derivations = db::get_derivations_for(&h.pool, meta.id).await.unwrap();
     assert_eq!(meta_derivations.len(), 2, "meta should have 2 derivations");
-    let deriv_types: Vec<&str> = meta_derivations.iter().map(|d| d.derivation_type.as_str()).collect();
+    let deriv_types: Vec<&str> = meta_derivations
+        .iter()
+        .map(|d| d.derivation_type.as_str())
+        .collect();
     assert!(deriv_types.contains(&"supersession_of"));
     assert!(deriv_types.contains(&"supersession_to"));
 }
@@ -3982,10 +4005,7 @@ impl Llm for DisagreeFixtureLlm {
     async fn complete(&self, system: &str, user: &str) -> chitta::error::Result<String> {
         if system.contains("extract consolidated claims") {
             if user.contains("correction") || user.contains("actually prefers") {
-                Ok(
-                    r#"[{"memory_type": "preference", "claim": "Josh prefers dark mode"}]"#
-                        .into(),
-                )
+                Ok(r#"[{"memory_type": "preference", "claim": "Josh prefers dark mode"}]"#.into())
             } else {
                 Ok("[]".into())
             }
@@ -4092,7 +4112,9 @@ async fn synthesis_disagree_flagged_supersession() {
     }
 
     // 4. Fetch all raw rows since epoch (includes feedback + correction + observations)
-    let rows = db::fetch_raw_since(&h.pool, &h.profile, None).await.unwrap();
+    let rows = db::fetch_raw_since(&h.pool, &h.profile, None)
+        .await
+        .unwrap();
 
     // Verify disagree targets are found
     let targets = synthesis::find_disagree_targets(&rows);
@@ -4106,18 +4128,15 @@ async fn synthesis_disagree_flagged_supersession() {
         target_claim: "Josh prefers light mode".into(),
     };
 
-    let result = synthesis::run_synthesis(
-        &h.pool,
-        &h.embedder,
-        &llm,
-        &h.profile,
-        &rows,
-        Utc::now(),
-    )
-    .await
-    .unwrap();
+    let result =
+        synthesis::run_synthesis(&h.pool, &h.embedder, &llm, &h.profile, &rows, Utc::now())
+            .await
+            .unwrap();
 
-    assert_eq!(result.supersessions, 1, "should supersede the disagreed-with memory");
+    assert_eq!(
+        result.supersessions, 1,
+        "should supersede the disagreed-with memory"
+    );
 
     // 6. Verify the old memory is superseded
     let old_row = db::get_memory_by_id(&h.pool, &h.profile, old_id)
@@ -4130,14 +4149,16 @@ async fn synthesis_disagree_flagged_supersession() {
     );
 
     // 7. Verify meta-observation written
-    let all_mental_models =
-        db::list_recent(&h.pool, &h.profile, 50, &[], &["mental_model".into()])
-            .await
-            .unwrap();
+    let all_mental_models = db::list_recent(&h.pool, &h.profile, 50, &[], &["mental_model".into()])
+        .await
+        .unwrap();
     let meta = all_mental_models
         .iter()
         .find(|r| r.tags.contains(&"supersession".to_string()));
-    assert!(meta.is_some(), "meta-observation should be written for disagree supersession");
+    assert!(
+        meta.is_some(),
+        "meta-observation should be written for disagree supersession"
+    );
 }
 
 // ---- synthesis: two clusters targeting same memory ───────────────────
@@ -4152,7 +4173,10 @@ impl Llm for TwoClusterFixtureLlm {
             if user.contains("prefers spaces") {
                 Ok(r#"[{"memory_type": "preference", "claim": "Josh prefers spaces"}]"#.into())
             } else if user.contains("uses 4-space indent") {
-                Ok(r#"[{"memory_type": "preference", "claim": "Josh uses 4-space indent"}]"#.into())
+                Ok(
+                    r#"[{"memory_type": "preference", "claim": "Josh uses 4-space indent"}]"#
+                        .into(),
+                )
             } else {
                 Ok("[]".into())
             }
@@ -4297,16 +4321,10 @@ async fn synthesis_two_clusters_same_target_only_first_supersedes() {
         existing_claim: "Josh prefers tabs over spaces".into(),
     };
 
-    let result = synthesis::run_synthesis(
-        &h.pool,
-        &h.embedder,
-        &llm,
-        &h.profile,
-        &rows,
-        Utc::now(),
-    )
-    .await
-    .unwrap();
+    let result =
+        synthesis::run_synthesis(&h.pool, &h.embedder, &llm, &h.profile, &rows, Utc::now())
+            .await
+            .unwrap();
 
     // Both clusters emitted, but only the first should supersede
     assert_eq!(result.clusters_emitted, 2);
@@ -4330,9 +4348,7 @@ struct ReflectFixtureLlm;
 impl Llm for ReflectFixtureLlm {
     async fn complete(&self, system: &str, _user: &str) -> chitta::error::Result<String> {
         if system.contains("extract consolidated claims") {
-            Ok(
-                r#"[{"memory_type": "preference", "claim": "Josh prefers concise code"}]"#.into(),
-            )
+            Ok(r#"[{"memory_type": "preference", "claim": "Josh prefers concise code"}]"#.into())
         } else if system.contains("group candidate claims") {
             Ok(
                 r#"[{"representative_claim": "Josh prefers concise code", "memory_type": "preference", "member_indices": [0, 1, 2, 3, 4, 5]}]"#.into(),
@@ -4417,5 +4433,8 @@ async fn reflect_pipeline_end_to_end() {
     let result2 = chitta::reflect::reflect_pipeline(&h.pool, &h.embedder, &llm, &h.profile)
         .await
         .unwrap();
-    assert_eq!(result2.clusters_formed, 0, "second run should find nothing new");
+    assert_eq!(
+        result2.clusters_formed, 0,
+        "second run should find nothing new"
+    );
 }

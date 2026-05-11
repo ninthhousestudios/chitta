@@ -79,9 +79,8 @@ fn parse_response(response: &str, source_id: Uuid) -> Result<Vec<Candidate>> {
     let trimmed = response.trim();
     let json_str = strip_markdown_fences(trimmed);
 
-    let raw: Vec<RawCandidate> = serde_json::from_str(json_str).map_err(|e| {
-        ChittaError::Internal(format!("LLM returned unparseable JSON: {e}"))
-    })?;
+    let raw: Vec<RawCandidate> = serde_json::from_str(json_str)
+        .map_err(|e| ChittaError::Internal(format!("LLM returned unparseable JSON: {e}")))?;
 
     let candidates = raw
         .into_iter()
@@ -97,7 +96,10 @@ fn parse_response(response: &str, source_id: Uuid) -> Result<Vec<Candidate>> {
 }
 
 fn strip_markdown_fences(s: &str) -> &str {
-    let s = s.strip_prefix("```json").or_else(|| s.strip_prefix("```")).unwrap_or(s);
+    let s = s
+        .strip_prefix("```json")
+        .or_else(|| s.strip_prefix("```"))
+        .unwrap_or(s);
     let s = s.strip_suffix("```").unwrap_or(s);
     s.trim()
 }
@@ -240,8 +242,7 @@ pub fn check_threshold(
         .filter_map(|id| source_times.get(id))
         .collect();
 
-    let distinct_days: HashSet<chrono::NaiveDate> =
-        times.iter().map(|t| t.date_naive()).collect();
+    let distinct_days: HashSet<chrono::NaiveDate> = times.iter().map(|t| t.date_naive()).collect();
     if distinct_days.len() < config.min_distinct_days {
         return false;
     }
@@ -262,6 +263,7 @@ pub async fn emit_consolidated(
     cluster: &Cluster,
     profile: &str,
     now: DateTime<Utc>,
+    source_facets: Facets,
 ) -> Result<(MemoryRow, bool)> {
     let confidence = emission_confidence(cluster.source_ids.len());
     let id = Uuid::now_v7();
@@ -280,11 +282,27 @@ pub async fn emit_consolidated(
     let hash = Sha256::digest(key_material.as_bytes());
     let idem_key = format!(
         "reflect-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        hash[0], hash[1], hash[2], hash[3], hash[4], hash[5], hash[6], hash[7],
-        hash[8], hash[9], hash[10], hash[11], hash[12], hash[13], hash[14], hash[15]
+        hash[0],
+        hash[1],
+        hash[2],
+        hash[3],
+        hash[4],
+        hash[5],
+        hash[6],
+        hash[7],
+        hash[8],
+        hash[9],
+        hash[10],
+        hash[11],
+        hash[12],
+        hash[13],
+        hash[14],
+        hash[15]
     );
 
-    let embed_out = embedder.embed_full(&cluster.representative_claim, "reflect").await?;
+    let embed_out = embedder
+        .embed_full(&cluster.representative_claim, "reflect")
+        .await?;
     let sparse_json = serde_json::to_value(&embed_out.sparse)
         .map_err(|e| ChittaError::Internal(format!("sparse serialization: {e}")))?;
 
@@ -302,7 +320,7 @@ pub async fn emit_consolidated(
         tags: vec!["reflect".into(), "synthesised".into()],
         external_refs: None,
         metadata: None,
-        facets: Facets::default(),
+        facets: source_facets,
         superseded_by: None,
         confidence: Some(confidence),
         reinforcement_count: 0,
@@ -390,10 +408,7 @@ fn parse_contradiction_response(
         }
         Some(idx) => {
             let shift = raw.shift.unwrap_or_else(|| {
-                format!(
-                    "Changed from '{}' to a new position",
-                    existing[idx].content
-                )
+                format!("Changed from '{}' to a new position", existing[idx].content)
             });
             Ok(Some(Contradiction {
                 existing_id: existing[idx].id,
@@ -420,15 +435,13 @@ pub async fn emit_with_supersession(
     contradiction: &Contradiction,
     profile: &str,
     now: DateTime<Utc>,
+    source_facets: Facets,
 ) -> Result<SupersessionResult> {
     let (new_row, idempotent_replay) =
-        emit_consolidated(pool, embedder, cluster, profile, now).await?;
+        emit_consolidated(pool, embedder, cluster, profile, now, source_facets.clone()).await?;
 
     let old_row = db::get_memory_by_id(pool, profile, contradiction.existing_id).await?;
-    let already_superseded = old_row
-        .as_ref()
-        .and_then(|r| r.superseded_by)
-        .is_some();
+    let already_superseded = old_row.as_ref().and_then(|r| r.superseded_by).is_some();
 
     if !already_superseded {
         db::supersede_memory(pool, contradiction.existing_id, new_row.id).await?;
@@ -436,15 +449,10 @@ pub async fn emit_with_supersession(
 
     let meta_content = format!(
         "Josh shifted from '{}' to '{}' — {}",
-        contradiction.existing_claim,
-        cluster.representative_claim,
-        contradiction.shift_description,
+        contradiction.existing_claim, cluster.representative_claim, contradiction.shift_description,
     );
     let meta_id = Uuid::now_v7();
-    let meta_idem_key = format!(
-        "reflect-meta-{}-{}",
-        contradiction.existing_id, new_row.id
-    );
+    let meta_idem_key = format!("reflect-meta-{}-{}", contradiction.existing_id, new_row.id);
 
     let embed_out = embedder.embed_full(&meta_content, "reflect").await?;
     let sparse_json = serde_json::to_value(&embed_out.sparse)
@@ -468,7 +476,7 @@ pub async fn emit_with_supersession(
         ],
         external_refs: None,
         metadata: None,
-        facets: Facets::default(),
+        facets: source_facets,
         superseded_by: None,
         confidence: Some(emission_confidence(cluster.source_ids.len())),
         reinforcement_count: 0,
@@ -497,8 +505,7 @@ pub async fn emit_with_supersession(
 pub fn find_disagree_targets(rows: &[MemoryRow]) -> Vec<Uuid> {
     rows.iter()
         .filter(|r| {
-            r.tags.iter().any(|t| t == "feedback")
-                && r.tags.iter().any(|t| t == "disagree")
+            r.tags.iter().any(|t| t == "feedback") && r.tags.iter().any(|t| t == "disagree")
         })
         .filter_map(|r| {
             r.external_refs
@@ -537,12 +544,12 @@ pub async fn run_synthesis(
 
     let source_times: HashMap<Uuid, DateTime<Utc>> =
         rows.iter().map(|r| (r.id, r.record_time)).collect();
+    let rows_by_id: HashMap<Uuid, &MemoryRow> = rows.iter().map(|r| (r.id, r)).collect();
     let config = ThresholdConfig::default();
 
     let mut existing = db::fetch_profile_candidates(pool, profile).await?;
 
-    let disagree_targets: HashSet<Uuid> =
-        find_disagree_targets(rows).into_iter().collect();
+    let disagree_targets: HashSet<Uuid> = find_disagree_targets(rows).into_iter().collect();
     let existing_ids: HashSet<Uuid> = existing.iter().map(|r| r.id).collect();
     for &target_id in &disagree_targets {
         if !existing_ids.contains(&target_id) {
@@ -571,19 +578,26 @@ pub async fn run_synthesis(
             .iter()
             .filter(|r| !superseded_ids.contains(&r.id))
             .collect();
-        let active_refs: Vec<MemoryRow> =
-            active_existing.into_iter().cloned().collect();
+        let active_refs: Vec<MemoryRow> = active_existing.into_iter().cloned().collect();
 
         let contradiction =
-            detect_contradiction(llm, &cluster.representative_claim, &active_refs)
-                .await?;
+            detect_contradiction(llm, &cluster.representative_claim, &active_refs).await?;
+
+        let source_facet_list: Vec<Facets> = cluster
+            .source_ids
+            .iter()
+            .filter_map(|id| rows_by_id.get(id))
+            .map(|r| r.facets.clone())
+            .collect();
+        let source_facets = Facets::distinct_union(&source_facet_list);
 
         if let Some(c) = contradiction {
-            emit_with_supersession(pool, embedder, cluster, &c, profile, now).await?;
+            emit_with_supersession(pool, embedder, cluster, &c, profile, now, source_facets)
+                .await?;
             superseded_ids.insert(c.existing_id);
             result.supersessions += 1;
         } else {
-            emit_consolidated(pool, embedder, cluster, profile, now).await?;
+            emit_consolidated(pool, embedder, cluster, profile, now, source_facets).await?;
         }
         result.clusters_emitted += 1;
     }
@@ -678,11 +692,13 @@ mod tests {
             "Josh values simplicity, prefers Rust, and always reviews PRs thoroughly",
             "observation",
         );
-        let llm = MockLlm::new(vec![r#"[
+        let llm = MockLlm::new(vec![
+            r#"[
             {"memory_type": "value", "claim": "Josh values simplicity in design"},
             {"memory_type": "preference", "claim": "Josh prefers Rust as his primary language"},
             {"memory_type": "pattern", "claim": "Josh reviews PRs thoroughly before merging"}
-        ]"#]);
+        ]"#,
+        ]);
 
         let result = extract_candidates(&llm, &[row]).await.unwrap();
         assert_eq!(result.len(), 3);
@@ -714,11 +730,13 @@ mod tests {
     async fn invalid_memory_type_filtered_out() {
         let id = Uuid::now_v7();
         let row = make_row(id, "some content", "observation");
-        let llm = MockLlm::new(vec![r#"[
+        let llm = MockLlm::new(vec![
+            r#"[
             {"memory_type": "preference", "claim": "valid claim"},
             {"memory_type": "observation", "claim": "wrong type, should be filtered"},
             {"memory_type": "trait", "claim": "another valid claim"}
-        ]"#]);
+        ]"#,
+        ]);
 
         let result = extract_candidates(&llm, &[row]).await.unwrap();
         assert_eq!(result.len(), 2);
@@ -742,10 +760,12 @@ mod tests {
     async fn empty_claim_filtered_out() {
         let id = Uuid::now_v7();
         let row = make_row(id, "content", "observation");
-        let llm = MockLlm::new(vec![r#"[
+        let llm = MockLlm::new(vec![
+            r#"[
             {"memory_type": "trait", "claim": ""},
             {"memory_type": "value", "claim": "real claim"}
-        ]"#]);
+        ]"#,
+        ]);
 
         let result = extract_candidates(&llm, &[row]).await.unwrap();
         assert_eq!(result.len(), 1);
@@ -865,14 +885,15 @@ mod tests {
             "Josh prefers Rust",
             "preference",
         )];
-        let llm = MockLlm::new(vec![
-            r#"{"contradicts_index": 5, "shift": "bogus"}"#,
-        ]);
+        let llm = MockLlm::new(vec![r#"{"contradicts_index": 5, "shift": "bogus"}"#]);
 
         let result = detect_contradiction(&llm, "some claim", &existing)
             .await
             .unwrap();
-        assert!(result.is_none(), "out-of-range index should be treated as no contradiction");
+        assert!(
+            result.is_none(),
+            "out-of-range index should be treated as no contradiction"
+        );
     }
 
     #[tokio::test]
@@ -889,10 +910,9 @@ mod tests {
             r#"{"contradicts_index": 1, "shift": "now enjoys collaborative meetings"}"#,
         ]);
 
-        let result =
-            detect_contradiction(&llm, "Josh finds meetings productive", &existing)
-                .await
-                .unwrap();
+        let result = detect_contradiction(&llm, "Josh finds meetings productive", &existing)
+            .await
+            .unwrap();
         let c = result.expect("should detect contradiction");
         assert_eq!(c.existing_id, id1);
         assert_eq!(c.existing_claim, "Josh dislikes meetings");
@@ -916,7 +936,11 @@ mod tests {
     #[test]
     fn disagree_targets_extracted() {
         let target_id = Uuid::now_v7();
-        let mut row = make_row(Uuid::now_v7(), "Feedback: disagree with memory", "observation");
+        let mut row = make_row(
+            Uuid::now_v7(),
+            "Feedback: disagree with memory",
+            "observation",
+        );
         row.tags = vec!["feedback".into(), "disagree".into()];
         row.external_refs = Some(serde_json::json!([
             {"kind": "memory", "ref": target_id.to_string()}
@@ -961,22 +985,51 @@ mod tests {
     async fn cluster_groups_similar_claims() {
         let ids: Vec<Uuid> = (0..6).map(|_| Uuid::now_v7()).collect();
         let candidates = vec![
-            Candidate { memory_type: "preference".into(), claim: "Josh prefers Rust".into(), source_id: ids[0] },
-            Candidate { memory_type: "preference".into(), claim: "Josh likes Rust for systems".into(), source_id: ids[1] },
-            Candidate { memory_type: "preference".into(), claim: "Josh chooses Rust".into(), source_id: ids[2] },
-            Candidate { memory_type: "value".into(), claim: "Josh values simplicity".into(), source_id: ids[3] },
-            Candidate { memory_type: "value".into(), claim: "Josh prefers simple designs".into(), source_id: ids[4] },
-            Candidate { memory_type: "value".into(), claim: "Josh avoids complexity".into(), source_id: ids[5] },
+            Candidate {
+                memory_type: "preference".into(),
+                claim: "Josh prefers Rust".into(),
+                source_id: ids[0],
+            },
+            Candidate {
+                memory_type: "preference".into(),
+                claim: "Josh likes Rust for systems".into(),
+                source_id: ids[1],
+            },
+            Candidate {
+                memory_type: "preference".into(),
+                claim: "Josh chooses Rust".into(),
+                source_id: ids[2],
+            },
+            Candidate {
+                memory_type: "value".into(),
+                claim: "Josh values simplicity".into(),
+                source_id: ids[3],
+            },
+            Candidate {
+                memory_type: "value".into(),
+                claim: "Josh prefers simple designs".into(),
+                source_id: ids[4],
+            },
+            Candidate {
+                memory_type: "value".into(),
+                claim: "Josh avoids complexity".into(),
+                source_id: ids[5],
+            },
         ];
 
-        let llm = MockLlm::new(vec![r#"[
+        let llm = MockLlm::new(vec![
+            r#"[
             {"representative_claim": "Josh prefers Rust for systems programming", "memory_type": "preference", "member_indices": [0, 1, 2]},
             {"representative_claim": "Josh values simplicity in design", "memory_type": "value", "member_indices": [3, 4, 5]}
-        ]"#]);
+        ]"#,
+        ]);
 
         let clusters = cluster_candidates(&llm, &candidates).await.unwrap();
         assert_eq!(clusters.len(), 2);
-        assert_eq!(clusters[0].representative_claim, "Josh prefers Rust for systems programming");
+        assert_eq!(
+            clusters[0].representative_claim,
+            "Josh prefers Rust for systems programming"
+        );
         assert_eq!(clusters[0].memory_type, "preference");
         assert_eq!(clusters[0].source_ids.len(), 3);
         assert_eq!(clusters[1].memory_type, "value");
@@ -986,8 +1039,16 @@ mod tests {
     async fn cluster_deduplicates_source_ids() {
         let id = Uuid::now_v7();
         let candidates = vec![
-            Candidate { memory_type: "trait".into(), claim: "claim A".into(), source_id: id },
-            Candidate { memory_type: "trait".into(), claim: "claim B".into(), source_id: id },
+            Candidate {
+                memory_type: "trait".into(),
+                claim: "claim A".into(),
+                source_id: id,
+            },
+            Candidate {
+                memory_type: "trait".into(),
+                claim: "claim B".into(),
+                source_id: id,
+            },
         ];
 
         let llm = MockLlm::new(vec![
@@ -996,56 +1057,88 @@ mod tests {
 
         let clusters = cluster_candidates(&llm, &candidates).await.unwrap();
         assert_eq!(clusters.len(), 1);
-        assert_eq!(clusters[0].source_ids.len(), 1, "same source_id should be deduplicated");
+        assert_eq!(
+            clusters[0].source_ids.len(),
+            1,
+            "same source_id should be deduplicated"
+        );
     }
 
     #[tokio::test]
     async fn cluster_rejects_out_of_range_index() {
         let id = Uuid::now_v7();
-        let candidates = vec![
-            Candidate { memory_type: "trait".into(), claim: "a claim".into(), source_id: id },
-        ];
+        let candidates = vec![Candidate {
+            memory_type: "trait".into(),
+            claim: "a claim".into(),
+            source_id: id,
+        }];
 
         let llm = MockLlm::new(vec![
             r#"[{"representative_claim": "a claim", "memory_type": "trait", "member_indices": [0, 5]}]"#,
         ]);
 
         let clusters = cluster_candidates(&llm, &candidates).await.unwrap();
-        assert!(clusters.is_empty(), "cluster with out-of-range index should be skipped");
+        assert!(
+            clusters.is_empty(),
+            "cluster with out-of-range index should be skipped"
+        );
     }
 
     #[tokio::test]
     async fn cluster_rejects_duplicate_index_across_clusters() {
         let ids: Vec<Uuid> = (0..3).map(|_| Uuid::now_v7()).collect();
         let candidates = vec![
-            Candidate { memory_type: "trait".into(), claim: "claim A".into(), source_id: ids[0] },
-            Candidate { memory_type: "trait".into(), claim: "claim B".into(), source_id: ids[1] },
-            Candidate { memory_type: "value".into(), claim: "claim C".into(), source_id: ids[2] },
+            Candidate {
+                memory_type: "trait".into(),
+                claim: "claim A".into(),
+                source_id: ids[0],
+            },
+            Candidate {
+                memory_type: "trait".into(),
+                claim: "claim B".into(),
+                source_id: ids[1],
+            },
+            Candidate {
+                memory_type: "value".into(),
+                claim: "claim C".into(),
+                source_id: ids[2],
+            },
         ];
 
-        let llm = MockLlm::new(vec![r#"[
+        let llm = MockLlm::new(vec![
+            r#"[
             {"representative_claim": "cluster 1", "memory_type": "trait", "member_indices": [0, 1]},
             {"representative_claim": "cluster 2", "memory_type": "value", "member_indices": [1, 2]}
-        ]"#]);
+        ]"#,
+        ]);
 
         let clusters = cluster_candidates(&llm, &candidates).await.unwrap();
-        assert_eq!(clusters.len(), 1, "second cluster reusing index 1 should be skipped");
+        assert_eq!(
+            clusters.len(),
+            1,
+            "second cluster reusing index 1 should be skipped"
+        );
         assert_eq!(clusters[0].representative_claim, "cluster 1");
     }
 
     #[tokio::test]
     async fn cluster_filters_invalid_memory_type() {
         let id = Uuid::now_v7();
-        let candidates = vec![
-            Candidate { memory_type: "trait".into(), claim: "a claim".into(), source_id: id },
-        ];
+        let candidates = vec![Candidate {
+            memory_type: "trait".into(),
+            claim: "a claim".into(),
+            source_id: id,
+        }];
 
         let llm = MockLlm::new(vec![
             r#"[{"representative_claim": "a claim", "memory_type": "observation", "member_indices": [0]}]"#,
         ]);
 
         let clusters = cluster_candidates(&llm, &candidates).await.unwrap();
-        assert!(clusters.is_empty(), "observation is not a valid consolidated type");
+        assert!(
+            clusters.is_empty(),
+            "observation is not a valid consolidated type"
+        );
     }
 
     // ── threshold tests ─────────────────────────────────────────────
@@ -1075,13 +1168,18 @@ mod tests {
         let ids: Vec<Uuid> = (0..4).map(|_| Uuid::now_v7()).collect();
         let now = utc(2026, 5, 11);
         let times: Vec<DateTime<Utc>> = vec![
-            utc(2026, 5, 1), utc(2026, 5, 2), utc(2026, 5, 3), utc(2026, 5, 4),
+            utc(2026, 5, 1),
+            utc(2026, 5, 2),
+            utc(2026, 5, 3),
+            utc(2026, 5, 4),
         ];
         let cluster = make_cluster(ids.clone());
         let source_times = make_source_times(&ids, &times);
 
-        assert!(!check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
-            "4 sources should fail size>=5");
+        assert!(
+            !check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
+            "4 sources should fail size>=5"
+        );
     }
 
     #[test]
@@ -1089,14 +1187,19 @@ mod tests {
         let ids: Vec<Uuid> = (0..5).map(|_| Uuid::now_v7()).collect();
         let now = utc(2026, 5, 11);
         let times: Vec<DateTime<Utc>> = vec![
-            utc(2026, 5, 1), utc(2026, 5, 2), utc(2026, 5, 3),
-            utc(2026, 5, 4), utc(2026, 5, 5),
+            utc(2026, 5, 1),
+            utc(2026, 5, 2),
+            utc(2026, 5, 3),
+            utc(2026, 5, 4),
+            utc(2026, 5, 5),
         ];
         let cluster = make_cluster(ids.clone());
         let source_times = make_source_times(&ids, &times);
 
-        assert!(check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
-            "exactly 5 sources across 5 days with recent data should pass");
+        assert!(
+            check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
+            "exactly 5 sources across 5 days with recent data should pass"
+        );
     }
 
     #[test]
@@ -1108,8 +1211,10 @@ mod tests {
         let cluster = make_cluster(ids.clone());
         let source_times = make_source_times(&ids, &times);
 
-        assert!(!check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
-            "all sources on same day should fail distinct_days>=2");
+        assert!(
+            !check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
+            "all sources on same day should fail distinct_days>=2"
+        );
     }
 
     #[test]
@@ -1117,14 +1222,19 @@ mod tests {
         let ids: Vec<Uuid> = (0..5).map(|_| Uuid::now_v7()).collect();
         let now = utc(2026, 5, 11);
         let times: Vec<DateTime<Utc>> = vec![
-            utc(2025, 1, 1), utc(2025, 1, 2), utc(2025, 1, 3),
-            utc(2025, 1, 4), utc(2025, 1, 5),
+            utc(2025, 1, 1),
+            utc(2025, 1, 2),
+            utc(2025, 1, 3),
+            utc(2025, 1, 4),
+            utc(2025, 1, 5),
         ];
         let cluster = make_cluster(ids.clone());
         let source_times = make_source_times(&ids, &times);
 
-        assert!(!check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
-            "all sources older than 90 days should fail recency check");
+        assert!(
+            !check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
+            "all sources older than 90 days should fail recency check"
+        );
     }
 
     #[test]
@@ -1132,14 +1242,21 @@ mod tests {
         let ids: Vec<Uuid> = (0..7).map(|_| Uuid::now_v7()).collect();
         let now = utc(2026, 5, 11);
         let times: Vec<DateTime<Utc>> = vec![
-            utc(2025, 12, 1), utc(2025, 12, 15), utc(2026, 1, 10),
-            utc(2026, 3, 5), utc(2026, 4, 20), utc(2026, 5, 1), utc(2026, 5, 10),
+            utc(2025, 12, 1),
+            utc(2025, 12, 15),
+            utc(2026, 1, 10),
+            utc(2026, 3, 5),
+            utc(2026, 4, 20),
+            utc(2026, 5, 1),
+            utc(2026, 5, 10),
         ];
         let cluster = make_cluster(ids.clone());
         let source_times = make_source_times(&ids, &times);
 
-        assert!(check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
-            "7 sources across many days with recent entries should pass all checks");
+        assert!(
+            check_threshold(&cluster, &source_times, now, &ThresholdConfig::default()),
+            "7 sources across many days with recent entries should pass all checks"
+        );
     }
 
     // ── confidence tests ────────────────────────────────────────────

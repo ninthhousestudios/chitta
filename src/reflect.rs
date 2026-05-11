@@ -33,9 +33,7 @@ pub async fn reflect_pipeline(
     eprintln!(
         "reflect: {} raw rows since {}",
         rows.len(),
-        since
-            .map(|t| t.to_string())
-            .unwrap_or("(all time)".into())
+        since.map(|t| t.to_string()).unwrap_or("(all time)".into())
     );
 
     let result = synthesis::run_synthesis(pool, embedder, llm, profile, &rows, Utc::now()).await?;

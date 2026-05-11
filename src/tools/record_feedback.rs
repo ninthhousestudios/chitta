@@ -165,7 +165,9 @@ async fn execute_feedback_tx(
     .ok_or_else(|| ChittaError::NotFound {
         tool: TOOL,
         kind: "memory",
-        next_action: "Verify the profile and memory_id. Use search_memories to locate the intended memory.".to_string(),
+        next_action:
+            "Verify the profile and memory_id. Use search_memories to locate the intended memory."
+                .to_string(),
     })?;
 
     if !is_consolidated(&row.memory_type) {
@@ -177,7 +179,9 @@ async fn execute_feedback_tx(
                 row.memory_type
             ),
             received: Some(serde_json::json!(row.memory_type)),
-            next_action: "Feedback can only be recorded on consolidated memories returned by get_profile.".to_string(),
+            next_action:
+                "Feedback can only be recorded on consolidated memories returned by get_profile."
+                    .to_string(),
         });
     }
 
@@ -187,7 +191,8 @@ async fn execute_feedback_tx(
             argument: "memory_id".to_string(),
             constraint: "target memory is superseded or invalidated".to_string(),
             received: None,
-            next_action: "Use get_profile to find the current active version of this memory.".to_string(),
+            next_action: "Use get_profile to find the current active version of this memory."
+                .to_string(),
         });
     }
 
@@ -207,12 +212,18 @@ async fn execute_feedback_tx(
         "reinforcement_count"
     };
 
+    let reinforced_at_expr = if bump_reinforcement {
+        "$4"
+    } else {
+        "last_reinforced_at"
+    };
+
     let query = format!(
         r#"
         UPDATE memories
         SET confidence          = {confidence_expr},
             reinforcement_count = {reinforcement_expr},
-            last_reinforced_at  = $4
+            last_reinforced_at  = {reinforced_at_expr}
         WHERE profile = $1 AND id = $2
           AND invalidated_at IS NULL
           AND superseded_by IS NULL
@@ -266,10 +277,7 @@ async fn execute_feedback_tx(
         let corr_refs = serde_json::json!([
             {"kind": "memory", "ref": memory_id.to_string()}
         ]);
-        let corr_tags = vec![
-            "correction".to_string(),
-            format!("contradicts:{memory_id}"),
-        ];
+        let corr_tags = vec!["correction".to_string(), format!("contradicts:{memory_id}")];
 
         sqlx::query(
             r#"
