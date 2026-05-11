@@ -13,5 +13,6 @@ pub mod facets;
 pub mod ingest;
 pub mod mcp;
 pub mod retrieval;
+pub mod synthesis;
 pub mod tools;
 pub mod validators;
