@@ -21,32 +21,32 @@ use chitta::{
 
 /// chitta: agent-native persistent memory MCP server.
 #[derive(Debug, Parser)]
-#[command(name = "chitta", version, about)]
+#[command(name = "chitta", version, about, arg_required_else_help = true)]
 struct Cli {
-    /// Run as a Streamable HTTP server instead of stdio.
-    #[arg(long)]
-    http: bool,
-
-    /// HTTP listen address (used with --http). Overrides CHITTA_HTTP_ADDR.
-    #[arg(long)]
-    http_addr: Option<String>,
-
-    /// HTTP listen port (used with --http). Overrides CHITTA_HTTP_PORT.
-    #[arg(long)]
-    http_port: Option<u16>,
-
-    /// Path to a file containing the bearer token for HTTP auth (required with --http).
-    #[arg(long)]
-    auth_token_file: Option<PathBuf>,
-
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 }
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Run chitta as a stdio MCP server (default when no subcommand given).
-    Serve,
+    /// Start the MCP server (stdio by default, --http for Streamable HTTP).
+    Serve {
+        /// Run as a Streamable HTTP server instead of stdio.
+        #[arg(long)]
+        http: bool,
+
+        /// HTTP listen address (used with --http). Overrides CHITTA_HTTP_ADDR.
+        #[arg(long)]
+        http_addr: Option<String>,
+
+        /// HTTP listen port (used with --http). Overrides CHITTA_HTTP_PORT.
+        #[arg(long)]
+        http_port: Option<u16>,
+
+        /// Path to a file containing the bearer token for HTTP auth (required with --http).
+        #[arg(long)]
+        auth_token_file: Option<PathBuf>,
+    },
     /// Re-run logged queries against current DB state for regression detection.
     Replay {
         /// Filter to a specific memory profile.
@@ -83,16 +83,18 @@ async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
 
     let cli = Cli::parse();
-    match cli.command {
-        Some(Commands::Replay { profile, limit }) => return run_replay(profile, limit).await,
-        Some(Commands::Backfill { batch_size }) => return run_backfill(batch_size).await,
-        Some(Commands::Reflect {
+    let serve_args = match cli.command {
+        Commands::Replay { profile, limit } => return run_replay(profile, limit).await,
+        Commands::Backfill { batch_size } => return run_backfill(batch_size).await,
+        Commands::Reflect {
             profile,
             model,
             api_key,
-        }) => return run_reflect(profile, model, api_key).await,
-        Some(Commands::Serve) | None => {}
-    }
+        } => return run_reflect(profile, model, api_key).await,
+        Commands::Serve { http, http_addr, http_port, auth_token_file } => {
+            (http, http_addr, http_port, auth_token_file)
+        }
+    };
 
     let cfg = Config::from_env().context("loading configuration from environment")?;
 
@@ -147,8 +149,9 @@ async fn main() -> Result<()> {
     )
     .context("loading embedding model")?;
 
-    if cli.http {
-        serve_http(cli, cfg, pool, embedder, query_log_enabled).await
+    let (http, http_addr, http_port, auth_token_file) = serve_args;
+    if http {
+        serve_http(http_addr, http_port, auth_token_file, cfg, pool, embedder, query_log_enabled).await
     } else {
         serve_stdio(pool, embedder, query_log_enabled, cfg.search).await
     }
@@ -418,7 +421,9 @@ async fn run_reflect(profile: String, model: String, use_api: bool) -> Result<()
 
 /// Streamable HTTP transport with bearer-token auth.
 async fn serve_http(
-    cli: Cli,
+    http_addr_override: Option<String>,
+    http_port_override: Option<u16>,
+    auth_token_file: Option<PathBuf>,
     cfg: Config,
     pool: sqlx::PgPool,
     embedder: Arc<Embedder>,
@@ -432,7 +437,7 @@ async fn serve_http(
     use tokio_util::sync::CancellationToken;
     use tower_http::validate_request::ValidateRequestHeaderLayer;
 
-    let token_path = cli.auth_token_file.ok_or_else(|| {
+    let token_path = auth_token_file.ok_or_else(|| {
         anyhow::anyhow!("--auth-token-file is required when running in --http mode")
     })?;
     let bearer_token = std::fs::read_to_string(&token_path)
@@ -450,8 +455,8 @@ async fn serve_http(
 
     let cancel = CancellationToken::new();
 
-    let http_addr = cli.http_addr.unwrap_or_else(|| cfg.http_addr.clone());
-    let http_port = cli.http_port.unwrap_or(cfg.http_port);
+    let http_addr = http_addr_override.unwrap_or_else(|| cfg.http_addr.clone());
+    let http_port = http_port_override.unwrap_or(cfg.http_port);
 
     let mut allowed_hosts = vec![
         "localhost".to_string(),
