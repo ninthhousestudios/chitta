@@ -152,7 +152,15 @@ pub async fn run_synthesis(
     now: DateTime<Utc>,
 ) -> Result<SynthesisResult> {
     let extraction = extract_candidates(llm, rows).await?;
+    eprintln!(
+        "extraction done: {} candidates from {} rows ({} skipped, {} errors)",
+        extraction.candidates.len(),
+        extraction.rows_scanned,
+        extraction.rows_skipped,
+        extraction.extraction_errors,
+    );
     let clusters = cluster_candidates(llm, &extraction.candidates).await?;
+    eprintln!("clustering done: {} clusters formed", clusters.len());
 
     let source_times: HashMap<Uuid, DateTime<Utc>> =
         rows.iter().map(|r| (r.id, r.record_time)).collect();
@@ -184,10 +192,14 @@ pub async fn run_synthesis(
         extraction_errors: extraction.extraction_errors,
     };
 
-    for cluster in &clusters {
-        if !check_threshold(cluster, &source_times, now, &config) {
-            continue;
-        }
+    let eligible: Vec<_> = clusters
+        .iter()
+        .filter(|c| check_threshold(c, &source_times, now, &config))
+        .collect();
+    eprintln!("emission: {} clusters passed threshold", eligible.len());
+
+    for (i, cluster) in eligible.iter().enumerate() {
+        eprintln!("emit: {}/{}", i + 1, eligible.len());
 
         let claim_embedding = embedder
             .embed_full(&cluster.representative_claim, "reflect")

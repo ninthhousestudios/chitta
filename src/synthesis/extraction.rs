@@ -36,7 +36,9 @@ pub async fn extract_candidates(
         rows_skipped: 0,
         extraction_errors: 0,
     };
-    for row in rows {
+    let total = rows.len();
+    for (i, row) in rows.iter().enumerate() {
+        eprintln!("extraction: {}/{total}", i + 1);
         match extract_one(llm, row).await {
             Ok(candidates) => {
                 if candidates.is_empty() {
