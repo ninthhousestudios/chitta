@@ -89,6 +89,9 @@ working directory is also loaded as a fallback.
 | `CHITTA_HTTP_PORT` | `3100` | HTTP listen port (with `--http`). |
 | `ORT_DYLIB_PATH` | *(loader default)* | Path to `libonnxruntime.so`. |
 | `ANTHROPIC_API_KEY` | *(unset)* | Required for `chitta reflect` (API backend, the default). |
+| `CHITTA_REFLECT_MIN_CLUSTER_SIZE` | `5` | Minimum source rows per cluster before emission. |
+| `CHITTA_REFLECT_MIN_DISTINCT_DAYS` | `2` | Source rows must span at least this many distinct days. |
+| `CHITTA_REFLECT_MAX_SOURCE_AGE_DAYS` | `90` | At least one source row must be within this many days. |
 
 See [`.env.example`](.env.example) for the full list including pool tuning
 and retrieval scoring knobs.
@@ -321,9 +324,16 @@ memories, and emit synthesized rows tagged `reflect` and `synthesised`.
 
 The default emission threshold is conservative: a cluster must have at least
 five source rows, span at least two distinct record-time days, and use source
-rows no older than 90 days. New consolidated memories start with confidence
-based on cluster size, and contradictory claims supersede the old active
-memory instead of deleting it.
+rows no older than 90 days. Tune these via environment variables to bootstrap
+a fresh working model or tighten quality later:
+
+```bash
+# Lower thresholds for first run / small corpus:
+CHITTA_REFLECT_MIN_CLUSTER_SIZE=2 CHITTA_REFLECT_MIN_DISTINCT_DAYS=1 chitta reflect --profile josh
+```
+
+New consolidated memories start with confidence based on cluster size, and
+contradictory claims supersede the old active memory instead of deleting it.
 
 The command prints a summary such as:
 

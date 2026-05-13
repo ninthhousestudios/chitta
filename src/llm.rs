@@ -97,7 +97,7 @@ impl Llm for ClaudeApiLlm {
     async fn complete(&self, system: &str, user: &str) -> Result<String> {
         let body = serde_json::json!({
             "model": self.model,
-            "max_tokens": 4096,
+            "max_tokens": 16384,
             "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             "messages": [{"role": "user", "content": user}],
         });

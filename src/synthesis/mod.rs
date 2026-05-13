@@ -85,6 +85,28 @@ impl Default for ThresholdConfig {
     }
 }
 
+impl ThresholdConfig {
+    pub fn from_env() -> Self {
+        let mut cfg = Self::default();
+        if let Ok(v) = std::env::var("CHITTA_REFLECT_MIN_CLUSTER_SIZE") {
+            if let Ok(n) = v.parse() {
+                cfg.min_cluster_size = n;
+            }
+        }
+        if let Ok(v) = std::env::var("CHITTA_REFLECT_MIN_DISTINCT_DAYS") {
+            if let Ok(n) = v.parse() {
+                cfg.min_distinct_days = n;
+            }
+        }
+        if let Ok(v) = std::env::var("CHITTA_REFLECT_MAX_SOURCE_AGE_DAYS") {
+            if let Ok(n) = v.parse() {
+                cfg.max_source_age_days = n;
+            }
+        }
+        cfg
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Contradiction {
     pub existing_id: Uuid,
@@ -179,7 +201,7 @@ pub async fn run_synthesis_from(
     let source_times: HashMap<Uuid, DateTime<Utc>> =
         rows.iter().map(|r| (r.id, r.record_time)).collect();
     let rows_by_id: HashMap<Uuid, &MemoryRow> = rows.iter().map(|r| (r.id, r)).collect();
-    let config = ThresholdConfig::default();
+    let config = ThresholdConfig::from_env();
 
     let mut existing = db::fetch_profile_candidates(pool, profile).await?;
 
