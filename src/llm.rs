@@ -98,7 +98,7 @@ impl Llm for ClaudeApiLlm {
         let body = serde_json::json!({
             "model": self.model,
             "max_tokens": 4096,
-            "system": [{"type": "text", "text": system}],
+            "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             "messages": [{"role": "user", "content": user}],
         });
 

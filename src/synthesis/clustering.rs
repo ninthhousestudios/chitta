@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use uuid::Uuid;
 
-use super::{strip_markdown_fences, Candidate, Cluster, Llm, LLM_TIMEOUT, VALID_TYPES};
+use super::{strip_markdown_fences, Candidate, Cluster, Llm, CLUSTER_TIMEOUT, VALID_TYPES};
 use crate::error::{ChittaError, Result};
 
 const CLUSTER_SYSTEM_PROMPT: &str = "\
@@ -41,7 +41,7 @@ pub async fn cluster_candidates(
     }
 
     let user = cluster_user_prompt(candidates);
-    let response = tokio::time::timeout(LLM_TIMEOUT, llm.complete(CLUSTER_SYSTEM_PROMPT, &user))
+    let response = tokio::time::timeout(CLUSTER_TIMEOUT, llm.complete(CLUSTER_SYSTEM_PROMPT, &user))
         .await
         .map_err(|_| ChittaError::Internal("LLM call timed out during clustering".into()))??;
     parse_cluster_response(&response, candidates)

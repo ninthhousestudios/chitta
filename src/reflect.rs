@@ -1,12 +1,18 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::Utc;
 use sqlx::PgPool;
 
+use crate::config::chitta_home;
 use crate::db;
 use crate::embedding::Embedder;
 use crate::error::Result;
-use crate::synthesis::{self, Llm, SynthesisResult};
+use crate::synthesis::{self, extract_candidates, ExtractionStats, Llm, SynthesisResult};
+
+fn checkpoint_path(profile: &str) -> PathBuf {
+    chitta_home().join(format!("reflect-checkpoint-{profile}.json"))
+}
 
 pub async fn reflect_pipeline(
     pool: &PgPool,
@@ -39,7 +45,34 @@ pub async fn reflect_pipeline(
         since.map(|t| t.to_string()).unwrap_or("(all time)".into())
     );
 
-    let result = synthesis::run_synthesis(pool, embedder, llm, profile, &rows, Utc::now()).await?;
+    let cp = checkpoint_path(profile);
+    let extraction = if cp.exists() {
+        match std::fs::read_to_string(&cp).and_then(|s| {
+            serde_json::from_str::<ExtractionStats>(&s)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        }) {
+            Ok(cached) => {
+                eprintln!(
+                    "resuming from checkpoint: {} cached candidates ({} rows)",
+                    cached.candidates.len(),
+                    cached.rows_scanned,
+                );
+                cached
+            }
+            Err(e) => {
+                eprintln!("checkpoint unreadable ({e}), re-extracting");
+                run_extraction_with_checkpoint(llm, &rows, &cp).await?
+            }
+        }
+    } else {
+        run_extraction_with_checkpoint(llm, &rows, &cp).await?
+    };
+
+    let result =
+        synthesis::run_synthesis_from(pool, embedder, llm, profile, &rows, extraction, Utc::now())
+            .await?;
+
+    let _ = std::fs::remove_file(&cp);
 
     let summary = serde_json::json!({
         "clusters_formed": result.clusters_formed,
@@ -65,4 +98,24 @@ pub async fn reflect_pipeline(
     );
 
     Ok(result)
+}
+
+async fn run_extraction_with_checkpoint(
+    llm: &(impl Llm + ?Sized),
+    rows: &[db::MemoryRow],
+    checkpoint: &PathBuf,
+) -> Result<ExtractionStats> {
+    let extraction = extract_candidates(llm, rows).await?;
+    eprintln!(
+        "extraction done: {} candidates from {} rows ({} skipped, {} errors)",
+        extraction.candidates.len(),
+        extraction.rows_scanned,
+        extraction.rows_skipped,
+        extraction.extraction_errors,
+    );
+    if let Ok(json) = serde_json::to_string(&extraction) {
+        let _ = std::fs::write(checkpoint, json);
+        eprintln!("checkpoint saved to {}", checkpoint.display());
+    }
+    Ok(extraction)
 }

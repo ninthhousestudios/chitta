@@ -29,6 +29,7 @@ pub use extraction::extract_candidates;
 pub use threshold::check_threshold;
 
 pub(crate) const LLM_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const CLUSTER_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub(crate) const VALID_TYPES: &[&str] = &["trait", "value", "pattern", "preference", "mental_model"];
 
@@ -52,6 +53,7 @@ pub trait Llm: Send + Sync {
     fn complete(&self, system: &str, user: &str) -> impl Future<Output = Result<String>> + Send;
 }
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExtractionStats {
     pub candidates: Vec<Candidate>,
     pub rows_scanned: usize,
@@ -159,6 +161,18 @@ pub async fn run_synthesis(
         extraction.rows_skipped,
         extraction.extraction_errors,
     );
+    run_synthesis_from(pool, embedder, llm, profile, rows, extraction, now).await
+}
+
+pub async fn run_synthesis_from(
+    pool: &PgPool,
+    embedder: &Arc<Embedder>,
+    llm: &(impl Llm + ?Sized),
+    profile: &str,
+    rows: &[MemoryRow],
+    extraction: ExtractionStats,
+    now: DateTime<Utc>,
+) -> Result<SynthesisResult> {
     let clusters = cluster_candidates(llm, &extraction.candidates).await?;
     eprintln!("clustering done: {} clusters formed", clusters.len());
 

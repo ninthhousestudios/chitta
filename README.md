@@ -88,7 +88,7 @@ working directory is also loaded as a fallback.
 | `CHITTA_HTTP_ADDR` | `127.0.0.1` | HTTP listen address (with `--http`). |
 | `CHITTA_HTTP_PORT` | `3100` | HTTP listen port (with `--http`). |
 | `ORT_DYLIB_PATH` | *(loader default)* | Path to `libonnxruntime.so`. |
-| `ANTHROPIC_API_KEY` | *(unset)* | Required only for `chitta reflect --api-key` builds. |
+| `ANTHROPIC_API_KEY` | *(unset)* | Required for `chitta reflect` (API backend, the default). |
 
 See [`.env.example`](.env.example) for the full list including pool tuning
 and retrieval scoring knobs.
@@ -294,10 +294,11 @@ important corrections:
 chitta reflect --profile josh
 ```
 
-By default this uses your local Claude CLI subscription:
+By default this uses the Anthropic API with prompt caching (reads
+`ANTHROPIC_API_KEY` from the environment or `.env`):
 
 ```bash
-claude -p --output-format text --model claude-sonnet-4-6
+chitta reflect --profile josh
 ```
 
 Override the model if needed:
@@ -306,12 +307,11 @@ Override the model if needed:
 chitta reflect --profile josh --model claude-opus-4-6
 ```
 
-To use the Anthropic API instead, build with the `api` feature and provide
-`ANTHROPIC_API_KEY`:
+To use the local Claude CLI subscription instead (slower — spawns one
+process per row):
 
 ```bash
-cargo build --features api
-ANTHROPIC_API_KEY=... chitta reflect --profile josh --api-key
+chitta reflect --profile josh --cli
 ```
 
 Reflect reads raw `observation`, `episode`, and `decision` rows since the last
@@ -405,8 +405,8 @@ Chitta is a Rust binary (~6k LOC) that speaks
 ### `reflect`
 
 ```bash
-chitta reflect --profile josh [--model claude-sonnet-4-6] [--api-key]
+chitta reflect --profile josh [--model claude-sonnet-4-6] [--cli]
 ```
 
-`--api-key` requires a binary built with `--features api`; without it, reflect
-uses the local `claude` CLI.
+By default, reflect uses the Anthropic API with prompt caching. Pass `--cli`
+to use the local `claude` CLI instead (slower for batch workloads).

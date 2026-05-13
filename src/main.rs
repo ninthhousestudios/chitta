@@ -70,9 +70,9 @@ enum Commands {
         /// Model override.
         #[arg(long, default_value = "claude-sonnet-4-6")]
         model: String,
-        /// Use Anthropic API instead of CLI subscription (reads ANTHROPIC_API_KEY from env).
+        /// Use local Claude CLI instead of Anthropic API.
         #[arg(long)]
-        api_key: bool,
+        cli: bool,
     },
 }
 
@@ -89,8 +89,8 @@ async fn main() -> Result<()> {
         Commands::Reflect {
             profile,
             model,
-            api_key,
-        } => return run_reflect(profile, model, api_key).await,
+            cli,
+        } => return run_reflect(profile, model, cli).await,
         Commands::Serve { http, http_addr, http_port, auth_token_file } => {
             (http, http_addr, http_port, auth_token_file)
         }
@@ -378,7 +378,7 @@ async fn run_backfill(batch_size: i64) -> Result<()> {
     Ok(())
 }
 
-async fn run_reflect(profile: String, model: String, use_api: bool) -> Result<()> {
+async fn run_reflect(profile: String, model: String, use_cli: bool) -> Result<()> {
     let cfg = Config::from_env().context("loading configuration from environment")?;
 
     tracing_subscriber::fmt()
@@ -399,7 +399,10 @@ async fn run_reflect(profile: String, model: String, use_api: bool) -> Result<()
     )
     .context("loading embedding model")?;
 
-    if use_api {
+    if use_cli {
+        let llm = ClaudeCliLlm::new(model);
+        chitta::reflect::reflect_pipeline(&pool, &embedder, &llm, &profile).await?;
+    } else {
         #[cfg(feature = "api")]
         {
             let llm = chitta::llm::ClaudeApiLlm::from_env(model)?;
@@ -408,12 +411,9 @@ async fn run_reflect(profile: String, model: String, use_api: bool) -> Result<()
         #[cfg(not(feature = "api"))]
         {
             anyhow::bail!(
-                "--api-key requires the `api` feature: rebuild with `cargo build --features api`"
+                "API backend requires the `api` feature: rebuild with `cargo build --features api`, or use --cli"
             );
         }
-    } else {
-        let llm = ClaudeCliLlm::new(model);
-        chitta::reflect::reflect_pipeline(&pool, &embedder, &llm, &profile).await?;
     };
 
     Ok(())
