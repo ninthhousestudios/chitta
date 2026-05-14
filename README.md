@@ -348,6 +348,28 @@ If there is nothing new to process, it prints:
 reflect: nothing to synthesize for profile 'josh'
 ```
 
+### Seed the working model with `/onboard`
+
+Skill file: [`onboard.md`](onboard.md).
+
+Use `/onboard` to run a structured Q&A interview that seeds (or enriches) the
+working model with intentional, high-signal observations. This produces cleaner
+material than the indirect observations agents store during normal sessions.
+
+The workflow:
+
+1. Load the current profile and identify gaps.
+2. Ask 3-4 questions per round across facets: values, workflow, background,
+   collaboration style, preferences, aspirations.
+3. Store raw observations after each round.
+4. Consolidate answers into typed memories (`trait`, `value`, `pattern`,
+   `preference`, `mental_model`).
+5. Present a summary for the human to review and correct.
+
+Run it when bootstrapping a fresh profile or when the existing profile feels
+thin. The skill adapts questions based on what's already consolidated, so
+re-running it is safe.
+
 ### Check pending evidence
 
 From an MCP-enabled session, call `reflect_status` before a full synthesis run:
