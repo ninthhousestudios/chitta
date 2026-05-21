@@ -15,7 +15,6 @@ use chitta::{
     db,
     embedding::Embedder,
     ingest,
-    llm::ClaudeCliLlm,
     mcp::ChittaServer,
 };
 
@@ -62,18 +61,18 @@ enum Commands {
         #[arg(long, default_value = "100")]
         batch_size: i64,
     },
-    /// Run working-model synthesis.
-    Reflect {
-        /// Profile to synthesize.
-        #[arg(long, default_value = "josh")]
-        profile: String,
-        /// Model override.
-        #[arg(long, default_value = "claude-sonnet-4-6")]
-        model: String,
-        /// Use local Claude CLI instead of Anthropic API.
-        #[arg(long)]
-        cli: bool,
-    },
+    // NOTE: Reflect subcommand disabled — the autonomous pipeline has a
+    // watermark bug (see reflect.rs header comment). Use the interactive
+    // /reflect skill in Claude Code instead.
+    //
+    // Reflect {
+    //     #[arg(long, default_value = "josh")]
+    //     profile: String,
+    //     #[arg(long, default_value = "claude-sonnet-4-6")]
+    //     model: String,
+    //     #[arg(long)]
+    //     cli: bool,
+    // },
 }
 
 #[tokio::main]
@@ -86,11 +85,8 @@ async fn main() -> Result<()> {
     let serve_args = match cli.command {
         Commands::Replay { profile, limit } => return run_replay(profile, limit).await,
         Commands::Backfill { batch_size } => return run_backfill(batch_size).await,
-        Commands::Reflect {
-            profile,
-            model,
-            cli,
-        } => return run_reflect(profile, model, cli).await,
+        // Commands::Reflect { profile, model, cli }
+        //     => return run_reflect(profile, model, cli).await,
         Commands::Serve { http, http_addr, http_port, auth_token_file } => {
             (http, http_addr, http_port, auth_token_file)
         }
@@ -378,46 +374,33 @@ async fn run_backfill(batch_size: i64) -> Result<()> {
     Ok(())
 }
 
-async fn run_reflect(profile: String, model: String, use_cli: bool) -> Result<()> {
-    let cfg = Config::from_env().context("loading configuration from environment")?;
-
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("info"))
-        .with_writer(std::io::stderr)
-        .init();
-
-    let pool = db::connect(&cfg).await.context("connecting to database")?;
-    db::run_migrations(&pool)
-        .await
-        .context("running migrations")?;
-
-    let embedder = Embedder::load(
-        &cfg.model_file(),
-        &cfg.tokenizer_file(),
-        cfg.embedder_pool_size,
-        cfg.sparse_threshold,
-    )
-    .context("loading embedding model")?;
-
-    if use_cli {
-        let llm = ClaudeCliLlm::new(model);
-        chitta::reflect::reflect_pipeline(&pool, &embedder, &llm, &profile).await?;
-    } else {
-        #[cfg(feature = "api")]
-        {
-            let llm = chitta::llm::ClaudeApiLlm::from_env(model)?;
-            chitta::reflect::reflect_pipeline(&pool, &embedder, &llm, &profile).await?;
-        }
-        #[cfg(not(feature = "api"))]
-        {
-            anyhow::bail!(
-                "API backend requires the `api` feature: rebuild with `cargo build --features api`, or use --cli"
-            );
-        }
-    };
-
-    Ok(())
-}
+// Disabled — see reflect.rs header comment for the watermark bug.
+// async fn run_reflect(profile: String, model: String, use_cli: bool) -> Result<()> {
+//     let cfg = Config::from_env().context("loading configuration from environment")?;
+//     tracing_subscriber::fmt()
+//         .with_env_filter(EnvFilter::new("info"))
+//         .with_writer(std::io::stderr)
+//         .init();
+//     let pool = db::connect(&cfg).await.context("connecting to database")?;
+//     db::run_migrations(&pool).await.context("running migrations")?;
+//     let embedder = Embedder::load(
+//         &cfg.model_file(), &cfg.tokenizer_file(),
+//         cfg.embedder_pool_size, cfg.sparse_threshold,
+//     ).context("loading embedding model")?;
+//     if use_cli {
+//         let llm = ClaudeCliLlm::new(model);
+//         chitta::reflect::reflect_pipeline(&pool, &embedder, &llm, &profile).await?;
+//     } else {
+//         #[cfg(feature = "api")]
+//         {
+//             let llm = chitta::llm::ClaudeApiLlm::from_env(model)?;
+//             chitta::reflect::reflect_pipeline(&pool, &embedder, &llm, &profile).await?;
+//         }
+//         #[cfg(not(feature = "api"))]
+//         { anyhow::bail!("API backend requires the `api` feature"); }
+//     };
+//     Ok(())
+// }
 
 /// Streamable HTTP transport with bearer-token auth.
 async fn serve_http(

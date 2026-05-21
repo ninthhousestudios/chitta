@@ -1,3 +1,16 @@
+// BUG: watermark-advance-on-empty-emit
+//
+// reflect_pipeline always writes a reflect_runs row at the end (line ~85),
+// advancing the watermark past all rows it scanned. If clusters form but
+// none pass the threshold (e.g. min_cluster_size too high), those source
+// rows are never re-examined — the next run's `fetch_raw_since` starts
+// after the watermark, so they're silently orphaned.
+//
+// The fix would be: only advance the watermark past rows that were actually
+// emitted (or explicitly discarded by the user). But the autonomous pipeline
+// is disabled in favor of the interactive /reflect skill, so this is left
+// as a known issue for now.
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
