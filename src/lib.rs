@@ -15,6 +15,7 @@ pub mod llm;
 pub mod mcp;
 pub mod reflect;
 pub mod retrieval;
+pub mod schema_hints;
 pub mod synthesis;
 pub mod tools;
 pub mod validators;

@@ -9,6 +9,19 @@ use uuid::Uuid;
 
 use crate::error::{ChittaError, Result};
 
+/// Try to parse a `Value::String` as JSON. MCP clients may stringify nested
+/// objects/arrays when the schema lacks an explicit `type` hint. This coerces
+/// `Some(Value::String("{ ... }"))` → `Some(Value::Object(...))` (or Array),
+/// leaving all other variants untouched.
+pub fn coerce_json_string(value: Option<serde_json::Value>) -> Option<serde_json::Value> {
+    match value {
+        Some(serde_json::Value::String(ref s)) => {
+            serde_json::from_str(s).ok().or(value)
+        }
+        other => other,
+    }
+}
+
 const DECISION_ERROR_MSG: &str = "decision memory requires `metadata.rationale` and at least one \
      `metadata.rejected_alternatives` entry. Either supply them, demote \
      to memory_type=observation, or route to yojana.";
@@ -496,5 +509,53 @@ mod tests {
         assert!(episode_derivations(T, "observation", &None).is_ok());
         assert!(episode_derivations(T, "observation", &Some(vec![])).is_ok());
         assert!(episode_derivations(T, "decision", &None).is_ok());
+    }
+
+    // ---- coerce_json_string -----------------------------------------
+
+    #[test]
+    fn coerce_parses_stringified_object() {
+        let input = Some(json!(r#"{"rationale": "because", "rejected_alternatives": ["A"]}"#));
+        let result = coerce_json_string(input);
+        assert!(result.as_ref().unwrap().is_object());
+        assert_eq!(
+            result.as_ref().unwrap()["rationale"],
+            json!("because")
+        );
+    }
+
+    #[test]
+    fn coerce_parses_stringified_array() {
+        let input = Some(json!(r#"[{"kind": "file", "ref": "src/main.rs"}]"#));
+        let result = coerce_json_string(input);
+        assert!(result.as_ref().unwrap().is_array());
+    }
+
+    #[test]
+    fn coerce_leaves_object_untouched() {
+        let input = Some(json!({"rationale": "because"}));
+        let result = coerce_json_string(input.clone());
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn coerce_leaves_none_untouched() {
+        assert_eq!(coerce_json_string(None), None);
+    }
+
+    #[test]
+    fn coerce_leaves_plain_string_as_string() {
+        let input = Some(json!("not json"));
+        let result = coerce_json_string(input.clone());
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn coerce_then_validate_decision_succeeds() {
+        let stringified = Some(json!(
+            r#"{"rationale": "chose X", "rejected_alternatives": ["Y"]}"#
+        ));
+        let coerced = coerce_json_string(stringified);
+        assert!(validate_decision_metadata(T, "decision", &coerced).is_ok());
     }
 }

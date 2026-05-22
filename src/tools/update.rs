@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::db;
 use crate::embedding::Embedder;
 use crate::error::{ChittaError, Result};
+use crate::schema_hints;
 use crate::tools::validate;
 use crate::validators;
 
@@ -36,12 +37,14 @@ pub struct UpdateArgs {
     pub tags: Option<Vec<String>>,
     /// New metadata. Replaces existing metadata entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "schema_hints::nullable_object")]
     pub metadata: Option<serde_json::Value>,
     /// New memory type. Validates against allowed types.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_type: Option<String>,
     /// New external references. Replaces existing refs entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "schema_hints::nullable_array")]
     pub external_refs: Option<serde_json::Value>,
 }
 
@@ -69,8 +72,11 @@ pub struct UpdateOutput {
 pub async fn handle(
     pool: &PgPool,
     embedder: Arc<Embedder>,
-    args: UpdateArgs,
+    mut args: UpdateArgs,
 ) -> Result<UpdateOutput> {
+    args.metadata = validators::coerce_json_string(args.metadata);
+    args.external_refs = validators::coerce_json_string(args.external_refs);
+
     validate::profile(TOOL, &args.profile)?;
     let id = validate::parse_uuid(TOOL, "id", &args.id)?;
 

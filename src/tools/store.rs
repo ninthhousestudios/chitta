@@ -17,6 +17,7 @@ use crate::db::{self, MemoryRow};
 use crate::embedding::Embedder;
 use crate::error::{ChittaError, Result};
 use crate::facets::Facets;
+use crate::schema_hints;
 use crate::tools::validate;
 use crate::validators;
 pub use crate::validators::DerivationInput;
@@ -42,6 +43,7 @@ pub struct StoreArgs {
     pub tags: Option<Vec<String>>,
     /// Arbitrary structured data alongside the memory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "schema_hints::nullable_object")]
     pub metadata: Option<serde_json::Value>,
     /// Memory type. Default: "observation".
     /// Valid: observation, episode, decision, trait, value, pattern, preference, mental_model.
@@ -50,6 +52,7 @@ pub struct StoreArgs {
     /// External references. JSON array of `{"kind": "<type>", "ref": "<value>"}`.
     /// Kinds: file, commit, yojana_task, memory, url, session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "schema_hints::nullable_array")]
     pub external_refs: Option<serde_json::Value>,
     /// Context facets for retrieval scoping (domains, skills, projects, situations).
     #[serde(flatten)]
@@ -96,8 +99,11 @@ pub struct StoreOutput {
 pub async fn handle(
     pool: &PgPool,
     embedder: Arc<Embedder>,
-    args: StoreArgs,
+    mut args: StoreArgs,
 ) -> Result<StoreOutput> {
+    args.metadata = validators::coerce_json_string(args.metadata);
+    args.external_refs = validators::coerce_json_string(args.external_refs);
+
     validate::profile(TOOL, &args.profile)?;
     validate::content_byte_length(TOOL, &args.content)?;
     validate::content_non_empty(TOOL, &args.content)?;
