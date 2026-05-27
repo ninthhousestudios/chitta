@@ -2,31 +2,60 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-Chitta is the working model of the human in an AI-assisted workflow. It
-stores and retrieves what the person values, how they think, what patterns
-they follow, and what preferences they hold — so that every agent session
-starts grounded in who it's working with, not just what it's working on.
+Chitta is a personal cognition store for practitioners and the agents
+that work with them. It serves two complementary roles: a place where
+practitioners record their own thinking — research notes, session
+observations, hypotheses — and a place where agents accumulate a working
+model of the person — their preferences, patterns, and values — so that
+every session starts grounded in who it's working with.
 
 The Sanskrit *citta* (चित्त) means the field of impressions that conditions
-future thought and behavior. That's the role this subsystem plays: it
-accumulates observations across sessions, synthesizes them into stable
-traits and preferences, and surfaces them automatically so agents act
-consistently with the human they serve.
+future thought and behavior. Both directions of flow serve that purpose:
+the practitioner's recorded observations shape how they think about their
+domain; the agent's accumulated model shapes how it collaborates with the
+person. In either case, chitta holds what is known about or by the person,
+distinct from domain knowledge itself (which belongs in
+[vidya](https://github.com/ninthhousestudios/vidya)) or reference texts
+(which belong in [kosha](https://github.com/ninthhousestudios/kosha)).
 
 Part of [manas](https://github.com/ninthhousestudios/manas), a modular agent
 infrastructure built in Rust.
 
 ## What chitta is (and isn't)
 
-Chitta is **not** a general-purpose memory store. Other manas subsystems
-handle project tasks (yojana), code intelligence (sutra), file indexing
-(smriti), and document retrieval (kosha). Chitta holds only content that
-models the person — observations about their corrections, decisions that
-reveal their values, patterns in how they work.
+Chitta holds what a *person* knows, notices, and believes — not what a
+*domain* knows. Domain knowledge with provenance and tradition-scoping
+belongs in vidya. Source texts and reference material belong in kosha.
+Project tasks and dependencies belong in yojana. File indexing belongs in
+smriti.
 
-A memory belongs in chitta if it would help an agent act more like a
-trusted colleague who knows the human well. If it's about a codebase or a
-task, it belongs somewhere else.
+A memory belongs in chitta if it's something the practitioner observed,
+decided, or recorded — and would be lost if they didn't write it down.
+
+Chitta is domain-agnostic. Memory types are free text, not an enum. Each
+deployment establishes its own vocabulary and tagging conventions; chitta
+core doesn't know or care whether it holds clinical observations or
+software engineering preferences.
+
+## Deployments
+
+The same engine serves different roles depending on the consumer.
+
+**Manas** (developer cognition OS) — chitta models a software engineer for
+agent consistency. Memory types: `observation`, `decision`, `episode`.
+Consolidated types: `trait`, `value`, `pattern`, `preference`,
+`mental_model`. Agents store observations during sessions and synthesize
+them into a working model of the human so every session starts grounded.
+
+**Clinical / research** — chitta would hold a practitioner's research
+notes, case observations, session transcripts, and evolving hypotheses.
+Combined with vidya (verified domain knowledge) and kosha (source texts),
+an AI agent can cross-reference a researcher's own thinking with cited
+domain facts and primary sources in a single query — without hallucinating,
+because domain assertions carry provenance back to their source texts and
+traditions. This deployment pattern is demonstrated by
+[ayus](https://github.com/ninthhousestudios/ayus) and described further in
+its documentation.
 
 ## Design
 
