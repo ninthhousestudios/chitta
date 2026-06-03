@@ -1,6 +1,6 @@
 [package]
 name = "chitta"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 description = "Working model of Josh — agent-native persistent memory for the manas ecosystem."
 license = "AGPL-3.0"
