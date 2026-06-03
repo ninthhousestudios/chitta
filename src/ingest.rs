@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Json;
 use axum::extract::State;
@@ -155,27 +156,40 @@ pub async fn run_extraction_worker(
 ) {
     tracing::info!("ingest extraction worker started");
 
+    const MAX_ANCHOR_RETRIES: u32 = 5;
     let mut anchors: Option<Vec<AnchorEmbedding>> = None;
 
     while let Some(item) = rx.recv().await {
-        let anch = match &anchors {
-            Some(a) => a,
-            None => match load_anchors(&embedder).await {
-                Ok(a) => {
-                    tracing::info!(count = a.len(), "anchor embeddings loaded");
-                    anchors = Some(a);
-                    anchors.as_ref().unwrap()
+        if anchors.is_none() {
+            let mut loaded = false;
+            for attempt in 0..MAX_ANCHOR_RETRIES {
+                match load_anchors(&embedder).await {
+                    Ok(a) => {
+                        tracing::info!(count = a.len(), "anchor embeddings loaded");
+                        anchors = Some(a);
+                        loaded = true;
+                        break;
+                    }
+                    Err(e) => {
+                        let delay = Duration::from_secs(1 << attempt.min(4));
+                        tracing::warn!(
+                            attempt = attempt + 1,
+                            error = %e,
+                            retry_secs = delay.as_secs(),
+                            "failed to load anchor embeddings, retrying"
+                        );
+                        tokio::time::sleep(delay).await;
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        queue_id = %item.id,
-                        error = %e,
-                        "failed to load anchor embeddings, skipping item"
-                    );
-                    continue;
-                }
-            },
-        };
+            }
+            if !loaded {
+                tracing::error!(
+                    "anchor loading failed after {MAX_ANCHOR_RETRIES} retries, worker exiting"
+                );
+                return;
+            }
+        }
+        let anch = anchors.as_ref().unwrap();
         if let Err(e) = process_item(&item, &pool, &embedder, anch).await {
             tracing::warn!(
                 queue_id = %item.id,

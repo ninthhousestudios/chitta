@@ -522,7 +522,26 @@ impl LazyEmbedder {
         let mut guard = self.inner.write().await;
         if guard.is_some() {
             *guard = None;
+            tracing::info!("model unloaded (forced)");
+        }
+    }
+
+    async fn unload_if_idle(&self, ttl_secs: u64) -> bool {
+        let mut guard = self.inner.write().await;
+        if guard.is_none() {
+            return false;
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let last = self.last_used.load(Ordering::Relaxed);
+        if last > 0 && now.saturating_sub(last) > ttl_secs {
+            *guard = None;
             tracing::info!("model unloaded (idle TTL expired)");
+            true
+        } else {
+            false
         }
     }
 
@@ -535,6 +554,10 @@ impl LazyEmbedder {
 
     pub fn idle_ttl(&self) -> Duration {
         self.idle_ttl
+    }
+
+    pub fn model_files_exist(&self) -> bool {
+        self.model_path.is_file() && self.tokenizer_path.is_file()
     }
 
     pub fn spawn_reaper(self: &Arc<Self>) {
@@ -550,14 +573,7 @@ impl LazyEmbedder {
                 if !this.is_loaded() {
                     continue;
                 }
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let last = this.last_used.load(Ordering::Relaxed);
-                if last > 0 && now.saturating_sub(last) > ttl_secs {
-                    this.unload().await;
-                }
+                this.unload_if_idle(ttl_secs).await;
             }
         });
     }

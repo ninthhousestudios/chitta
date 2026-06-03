@@ -45,7 +45,7 @@ pub async fn handle(
     let embedder_ok = if model_loaded {
         embedder.embed("health check probe", TOOL).await.is_ok()
     } else {
-        true
+        embedder.model_files_exist()
     };
 
     let all_ok = db_connected && embedder_ok;
