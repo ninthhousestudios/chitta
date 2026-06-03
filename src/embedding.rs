@@ -35,8 +35,9 @@
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Once};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ndarray::Array2;
 use ort::session::{Session, builder::GraphOptimizationLevel};
@@ -417,6 +418,148 @@ impl Embedder {
                 );
             }
         }
+    }
+}
+
+// ── LazyEmbedder ─────────────────────────────────────────────────────
+
+pub struct LazyEmbedder {
+    model_path: PathBuf,
+    tokenizer_path: PathBuf,
+    pool_size: usize,
+    sparse_threshold: f32,
+    inner: tokio::sync::RwLock<Option<Arc<Embedder>>>,
+    load_barrier: tokio::sync::Mutex<()>,
+    last_used: AtomicU64,
+    idle_ttl: Duration,
+}
+
+impl LazyEmbedder {
+    pub fn new(
+        model_path: PathBuf,
+        tokenizer_path: PathBuf,
+        pool_size: usize,
+        sparse_threshold: f32,
+        idle_ttl: Duration,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            model_path,
+            tokenizer_path,
+            pool_size,
+            sparse_threshold,
+            inner: tokio::sync::RwLock::new(None),
+            load_barrier: tokio::sync::Mutex::new(()),
+            last_used: AtomicU64::new(0),
+            idle_ttl,
+        })
+    }
+
+    async fn ensure_loaded(&self) -> Result<Arc<Embedder>> {
+        // Fast path: model already loaded.
+        {
+            let guard = self.inner.read().await;
+            if let Some(ref e) = *guard {
+                self.touch();
+                return Ok(Arc::clone(e));
+            }
+        }
+        // Slow path: acquire barrier so only one task loads at a time.
+        let _barrier = self.load_barrier.lock().await;
+        // Re-check: another task may have loaded while we waited.
+        {
+            let guard = self.inner.read().await;
+            if let Some(ref e) = *guard {
+                self.touch();
+                return Ok(Arc::clone(e));
+            }
+        }
+        let mp = self.model_path.clone();
+        let tp = self.tokenizer_path.clone();
+        let ps = self.pool_size;
+        let st = self.sparse_threshold;
+        let embedder = tokio::task::spawn_blocking(move || Embedder::load(&mp, &tp, ps, st))
+            .await
+            .map_err(|e| ChittaError::Internal(format!("model load task failed: {e}")))??;
+        let mut guard = self.inner.write().await;
+        *guard = Some(Arc::clone(&embedder));
+        self.touch();
+        Ok(embedder)
+    }
+
+    fn touch(&self) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.last_used.store(now, Ordering::Relaxed);
+    }
+
+    pub async fn embed(self: &Arc<Self>, text: &str, tool: &'static str) -> Result<Vec<f32>> {
+        let inner = self.ensure_loaded().await?;
+        inner.embed(text, tool).await
+    }
+
+    pub async fn embed_full(
+        self: &Arc<Self>,
+        text: &str,
+        tool: &'static str,
+    ) -> Result<EmbedOutput> {
+        let inner = self.ensure_loaded().await?;
+        inner.embed_full(text, tool).await
+    }
+
+    pub fn pool_size(&self) -> usize {
+        self.pool_size
+    }
+
+    pub async fn warm(&self) -> Result<()> {
+        self.ensure_loaded().await?;
+        tracing::info!("model warmed");
+        Ok(())
+    }
+
+    pub async fn unload(&self) {
+        let mut guard = self.inner.write().await;
+        if guard.is_some() {
+            *guard = None;
+            tracing::info!("model unloaded (idle TTL expired)");
+        }
+    }
+
+    pub fn is_loaded(&self) -> bool {
+        self.inner
+            .try_read()
+            .map(|g| g.is_some())
+            .unwrap_or(false)
+    }
+
+    pub fn idle_ttl(&self) -> Duration {
+        self.idle_ttl
+    }
+
+    pub fn spawn_reaper(self: &Arc<Self>) {
+        let weak = Arc::downgrade(self);
+        let ttl_secs = self.idle_ttl.as_secs();
+        let check_interval = Duration::from_secs((ttl_secs / 4).clamp(15, 60));
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(check_interval).await;
+                let Some(this) = weak.upgrade() else {
+                    break;
+                };
+                if !this.is_loaded() {
+                    continue;
+                }
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = this.last_used.load(Ordering::Relaxed);
+                if last > 0 && now.saturating_sub(last) > ttl_secs {
+                    this.unload().await;
+                }
+            }
+        });
     }
 }
 

@@ -19,7 +19,7 @@ use sqlx::PgPool;
 
 use crate::config::chitta_home;
 use crate::db;
-use crate::embedding::Embedder;
+use crate::embedding::LazyEmbedder;
 use crate::error::Result;
 use crate::synthesis::{self, extract_candidates, ExtractionStats, Llm, SynthesisResult};
 
@@ -29,7 +29,7 @@ fn checkpoint_path(profile: &str) -> PathBuf {
 
 pub async fn reflect_pipeline(
     pool: &PgPool,
-    embedder: &Arc<Embedder>,
+    embedder: &Arc<LazyEmbedder>,
     llm: &(impl Llm + ?Sized),
     profile: &str,
 ) -> Result<SynthesisResult> {

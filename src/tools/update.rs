@@ -13,7 +13,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::db;
-use crate::embedding::Embedder;
+use crate::embedding::LazyEmbedder;
 use crate::error::{ChittaError, Result};
 use crate::schema_hints;
 use crate::tools::validate;
@@ -71,7 +71,7 @@ pub struct UpdateOutput {
 )]
 pub async fn handle(
     pool: &PgPool,
-    embedder: Arc<Embedder>,
+    embedder: Arc<LazyEmbedder>,
     mut args: UpdateArgs,
 ) -> Result<UpdateOutput> {
     args.metadata = validators::coerce_json_string(args.metadata);

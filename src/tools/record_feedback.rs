@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::consolidated::{CONSOLIDATED_TYPES, is_active, is_consolidated};
 use crate::db;
-use crate::embedding::Embedder;
+use crate::embedding::LazyEmbedder;
 use crate::error::{ChittaError, Result};
 use crate::facets::Facets;
 use crate::tools::validate;
@@ -63,7 +63,7 @@ struct PreparedCorrection {
 )]
 pub async fn handle(
     pool: &PgPool,
-    embedder: Arc<Embedder>,
+    embedder: Arc<LazyEmbedder>,
     args: RecordFeedbackArgs,
 ) -> Result<RecordFeedbackOutput> {
     // ── Phase 1: validate everything before any DB work ──────────

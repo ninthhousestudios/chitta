@@ -9,7 +9,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::db::{self, MemoryRow};
-use crate::embedding::Embedder;
+use crate::embedding::LazyEmbedder;
 use crate::error::Result;
 use crate::facets::Facets;
 
@@ -169,7 +169,7 @@ pub struct SynthesisResult {
 
 pub async fn run_synthesis(
     pool: &PgPool,
-    embedder: &Arc<Embedder>,
+    embedder: &Arc<LazyEmbedder>,
     llm: &(impl Llm + ?Sized),
     profile: &str,
     rows: &[MemoryRow],
@@ -188,7 +188,7 @@ pub async fn run_synthesis(
 
 pub async fn run_synthesis_from(
     pool: &PgPool,
-    embedder: &Arc<Embedder>,
+    embedder: &Arc<LazyEmbedder>,
     llm: &(impl Llm + ?Sized),
     profile: &str,
     rows: &[MemoryRow],

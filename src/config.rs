@@ -46,6 +46,9 @@ pub struct Config {
     pub http_port: u16,
     pub search: SearchConfig,
     pub sparse_threshold: f32,
+    /// Seconds of idle time before the embedding model is unloaded from memory.
+    /// Parsed from `CHITTA_MODEL_IDLE_TTL_SECS`. Default 900 (15 min).
+    pub model_idle_ttl_secs: u64,
 }
 
 impl Config {
@@ -90,6 +93,7 @@ impl Config {
             .filter(|s| !s.is_empty());
         let dedup_fetch_factor: i64 = parse_env_or::<i64>("CHITTA_DEDUP_FETCH_FACTOR", 3).max(1);
         let sparse_threshold: f32 = parse_env_or("CHITTA_SPARSE_THRESHOLD", 0.01);
+        let model_idle_ttl_secs: u64 = parse_env_or("CHITTA_MODEL_IDLE_TTL_SECS", 900);
         let type_weights: HashMap<String, f32> = std::env::var("CHITTA_TYPE_WEIGHTS")
             .ok()
             .filter(|s| !s.is_empty())
@@ -119,6 +123,7 @@ impl Config {
                 type_weights,
             },
             sparse_threshold,
+            model_idle_ttl_secs,
         })
     }
 

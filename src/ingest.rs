@@ -19,7 +19,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::db;
-use crate::embedding::Embedder;
+use crate::embedding::LazyEmbedder;
 use crate::error::ChittaError;
 use crate::facets::Facets;
 
@@ -151,23 +151,32 @@ struct AnchorEmbedding {
 pub async fn run_extraction_worker(
     mut rx: mpsc::Receiver<IngestItem>,
     pool: PgPool,
-    embedder: Arc<Embedder>,
+    embedder: Arc<LazyEmbedder>,
 ) {
     tracing::info!("ingest extraction worker started");
 
-    let anchors = match load_anchors(&embedder).await {
-        Ok(a) => {
-            tracing::info!(count = a.len(), "anchor embeddings loaded");
-            a
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "failed to load anchor embeddings, worker exiting");
-            return;
-        }
-    };
+    let mut anchors: Option<Vec<AnchorEmbedding>> = None;
 
     while let Some(item) = rx.recv().await {
-        if let Err(e) = process_item(&item, &pool, &embedder, &anchors).await {
+        let anch = match &anchors {
+            Some(a) => a,
+            None => match load_anchors(&embedder).await {
+                Ok(a) => {
+                    tracing::info!(count = a.len(), "anchor embeddings loaded");
+                    anchors = Some(a);
+                    anchors.as_ref().unwrap()
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        queue_id = %item.id,
+                        error = %e,
+                        "failed to load anchor embeddings, skipping item"
+                    );
+                    continue;
+                }
+            },
+        };
+        if let Err(e) = process_item(&item, &pool, &embedder, anch).await {
             tracing::warn!(
                 queue_id = %item.id,
                 error = %e,
@@ -179,7 +188,7 @@ pub async fn run_extraction_worker(
     tracing::info!("ingest extraction worker shutting down");
 }
 
-async fn load_anchors(embedder: &Arc<Embedder>) -> Result<Vec<AnchorEmbedding>, ChittaError> {
+async fn load_anchors(embedder: &Arc<LazyEmbedder>) -> Result<Vec<AnchorEmbedding>, ChittaError> {
     let mut anchors = Vec::with_capacity(ANCHOR_PHRASES.len());
     for (phrase, memory_type) in ANCHOR_PHRASES {
         let out = embedder.embed_full(phrase, "anchor_init").await?;
@@ -194,7 +203,7 @@ async fn load_anchors(embedder: &Arc<Embedder>) -> Result<Vec<AnchorEmbedding>, 
 async fn process_item(
     item: &IngestItem,
     pool: &PgPool,
-    embedder: &Arc<Embedder>,
+    embedder: &Arc<LazyEmbedder>,
     anchors: &[AnchorEmbedding],
 ) -> Result<(), ChittaError> {
     let sentences = split_chunks(&item.text);

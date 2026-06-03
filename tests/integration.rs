@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use chitta::config::{Config, SearchConfig};
 use chitta::db;
-use chitta::embedding::Embedder;
+use chitta::embedding::LazyEmbedder;
 use chitta::error::ChittaError;
 use chitta::facets::Facets;
 use chitta::synthesis::{self, Llm, ThresholdConfig};
@@ -52,7 +52,7 @@ use uuid::Uuid;
 
 struct Harness {
     pool: PgPool,
-    embedder: Arc<Embedder>,
+    embedder: Arc<LazyEmbedder>,
     profile: String,
 }
 
@@ -64,7 +64,7 @@ static SHARED: OnceCell<Option<SharedSetup>> = OnceCell::const_new();
 #[derive(Clone)]
 struct SharedSetup {
     database_url: String,
-    embedder: Arc<Embedder>,
+    embedder: Arc<LazyEmbedder>,
 }
 
 async fn shared() -> Option<SharedSetup> {
@@ -112,6 +112,7 @@ async fn try_shared() -> Option<SharedSetup> {
             type_weights: std::collections::HashMap::new(),
         },
         sparse_threshold: 0.01,
+        model_idle_ttl_secs: 900,
     };
 
     if !cfg.model_file().is_file() || !cfg.tokenizer_file().is_file() {
@@ -137,13 +138,17 @@ async fn try_shared() -> Option<SharedSetup> {
     }
     drop(bootstrap_pool);
 
-    let embedder = match Embedder::load(&cfg.model_file(), &cfg.tokenizer_file(), 1, 0.01) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("SKIPPED: embedder failed to load: {e:?}");
-            return None;
-        }
-    };
+    let embedder = LazyEmbedder::new(
+        cfg.model_file(),
+        cfg.tokenizer_file(),
+        1,
+        0.01,
+        std::time::Duration::from_secs(900),
+    );
+    if let Err(e) = embedder.warm().await {
+        eprintln!("SKIPPED: embedder failed to load: {e:?}");
+        return None;
+    }
 
     Some(SharedSetup {
         database_url,
@@ -176,6 +181,7 @@ async fn fresh_harness(name: &str) -> Option<Harness> {
             type_weights: std::collections::HashMap::new(),
         },
         sparse_threshold: 0.01,
+        model_idle_ttl_secs: 900,
     };
     let pool = match db::connect(&cfg).await {
         Ok(p) => p,

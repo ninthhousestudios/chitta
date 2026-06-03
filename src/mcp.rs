@@ -16,7 +16,7 @@ use rmcp::{
 use sqlx::PgPool;
 
 use crate::config::SearchConfig;
-use crate::embedding::Embedder;
+use crate::embedding::LazyEmbedder;
 use crate::error::ChittaError;
 use crate::tools;
 
@@ -24,7 +24,7 @@ use crate::tools;
 #[derive(Clone)]
 pub struct ChittaServer {
     pool: PgPool,
-    embedder: Arc<Embedder>,
+    embedder: Arc<LazyEmbedder>,
     query_log_enabled: bool,
     search_cfg: SearchConfig,
     tool_router: ToolRouter<Self>,
@@ -33,7 +33,7 @@ pub struct ChittaServer {
 impl ChittaServer {
     pub fn new(
         pool: PgPool,
-        embedder: Arc<Embedder>,
+        embedder: Arc<LazyEmbedder>,
         query_log_enabled: bool,
         search_cfg: SearchConfig,
     ) -> Self {

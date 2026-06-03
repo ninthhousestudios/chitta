@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
 use crate::config::SearchConfig;
-use crate::embedding::Embedder;
+use crate::embedding::LazyEmbedder;
 use crate::error::Result;
 
 const TOOL: &str = "health_check";
@@ -25,6 +25,7 @@ pub struct HealthOutput {
     pub retrieval_legs: Vec<&'static str>,
     pub db_connected: bool,
     pub embedder_ok: bool,
+    pub model_loaded: bool,
     pub embedder_pool_size: usize,
     pub version: &'static str,
 }
@@ -32,7 +33,7 @@ pub struct HealthOutput {
 #[tracing::instrument(name = "tool.health_check", skip(pool, embedder, search_cfg))]
 pub async fn handle(
     pool: &PgPool,
-    embedder: Arc<Embedder>,
+    embedder: Arc<LazyEmbedder>,
     search_cfg: &SearchConfig,
 ) -> Result<HealthOutput> {
     let db_connected = sqlx::query_scalar::<_, i32>("SELECT 1")
@@ -40,7 +41,12 @@ pub async fn handle(
         .await
         .is_ok();
 
-    let embedder_ok = embedder.embed("health check probe", TOOL).await.is_ok();
+    let model_loaded = embedder.is_loaded();
+    let embedder_ok = if model_loaded {
+        embedder.embed("health check probe", TOOL).await.is_ok()
+    } else {
+        true
+    };
 
     let all_ok = db_connected && embedder_ok;
 
@@ -57,6 +63,7 @@ pub async fn handle(
         retrieval_legs: legs,
         db_connected,
         embedder_ok,
+        model_loaded,
         embedder_pool_size: embedder.pool_size(),
         version: env!("CARGO_PKG_VERSION"),
     })

@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::{Cluster, Contradiction, SupersessionResult};
 use crate::db::{self, MemoryRow};
-use crate::embedding::Embedder;
+use crate::embedding::LazyEmbedder;
 use crate::error::{ChittaError, Result};
 use crate::facets::Facets;
 
@@ -67,7 +67,7 @@ fn cluster_idem_key(cluster: &Cluster) -> String {
 
 pub async fn emit_consolidated_auto(
     pool: &PgPool,
-    embedder: &Arc<Embedder>,
+    embedder: &Arc<LazyEmbedder>,
     cluster: &Cluster,
     profile: &str,
     now: DateTime<Utc>,
@@ -110,7 +110,7 @@ pub(crate) async fn emit_consolidated(
 
 pub(crate) async fn emit_with_supersession(
     pool: &PgPool,
-    embedder: &Arc<Embedder>,
+    embedder: &Arc<LazyEmbedder>,
     claim_embedding: &crate::embedding::EmbedOutput,
     cluster: &Cluster,
     contradiction: &Contradiction,

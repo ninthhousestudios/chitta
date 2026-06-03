@@ -13,7 +13,7 @@ use uuid::Uuid;
 use chitta::{
     config::{Config, chitta_home},
     db,
-    embedding::Embedder,
+    embedding::{Embedder, LazyEmbedder},
     ingest,
     mcp::ChittaServer,
 };
@@ -137,13 +137,19 @@ async fn main() -> Result<()> {
         false
     };
 
-    let embedder = Embedder::load(
-        &cfg.model_file(),
-        &cfg.tokenizer_file(),
+    let embedder = LazyEmbedder::new(
+        cfg.model_file(),
+        cfg.tokenizer_file(),
         cfg.embedder_pool_size,
         cfg.sparse_threshold,
-    )
-    .context("loading embedding model")?;
+        std::time::Duration::from_secs(cfg.model_idle_ttl_secs),
+    );
+    embedder.spawn_reaper();
+
+    tracing::info!(
+        idle_ttl_secs = cfg.model_idle_ttl_secs,
+        "embedding model will load on first use"
+    );
 
     let (http, http_addr, http_port, auth_token_file) = serve_args;
     if http {
@@ -156,7 +162,7 @@ async fn main() -> Result<()> {
 /// Stdio transport — the original v0.0.1 path.
 async fn serve_stdio(
     pool: sqlx::PgPool,
-    embedder: Arc<Embedder>,
+    embedder: Arc<LazyEmbedder>,
     query_log_enabled: bool,
     search_cfg: chitta::config::SearchConfig,
 ) -> Result<()> {
@@ -409,7 +415,7 @@ async fn serve_http(
     auth_token_file: Option<PathBuf>,
     cfg: Config,
     pool: sqlx::PgPool,
-    embedder: Arc<Embedder>,
+    embedder: Arc<LazyEmbedder>,
     query_log_enabled: bool,
 ) -> Result<()> {
     use axum::routing::any_service;
@@ -506,15 +512,38 @@ async fn serve_http(
         Arc::clone(&embedder),
     ));
 
+    let embedder_for_warm = Arc::clone(&embedder);
+    let warm_route = axum::routing::post(move || async move {
+        let start = std::time::Instant::now();
+        match embedder_for_warm.warm().await {
+            Ok(()) => (
+                axum::http::StatusCode::OK,
+                axum::Json(serde_json::json!({
+                    "status": "warm",
+                    "load_time_ms": start.elapsed().as_millis(),
+                })),
+            ),
+            Err(e) => (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(serde_json::json!({
+                    "status": "error",
+                    "message": e.to_string(),
+                })),
+            ),
+        }
+    });
+
     let authed = axum::Router::new()
         .route("/mcp", any_service(mcp_service))
         .route(
             "/ingest",
             axum::routing::post(ingest::ingest_handler).with_state(ingest_state),
         )
+        .route("/model/warm", warm_route)
         .layer(normalize_accept)
         .layer(ValidateRequestHeaderLayer::bearer(&bearer_token));
 
+    let embedder_for_status = Arc::clone(&embedder);
     let health_pool = pool.clone();
     #[allow(deprecated)]
     let app = axum::Router::new()
@@ -527,6 +556,15 @@ async fn serve_http(
                     .is_ok();
                 let status = if ok { "ok" } else { "degraded" };
                 axum::Json(serde_json::json!({ "status": status }))
+            }),
+        )
+        .route(
+            "/model/status",
+            axum::routing::get(move || async move {
+                axum::Json(serde_json::json!({
+                    "loaded": embedder_for_status.is_loaded(),
+                    "idle_ttl_secs": embedder_for_status.idle_ttl().as_secs(),
+                }))
             }),
         )
         .merge(authed);

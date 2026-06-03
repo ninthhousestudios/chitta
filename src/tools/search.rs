@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::config::SearchConfig;
 use crate::consolidated::{self, CONSOLIDATED_TYPES};
 use crate::db;
-use crate::embedding::Embedder;
+use crate::embedding::LazyEmbedder;
 use crate::envelope::{Envelope, estimate_tokens};
 use crate::error::{ChittaError, Result};
 use crate::facets::Facets;
@@ -142,7 +142,7 @@ pub type SearchOutput = Envelope<SearchHit>;
 )]
 pub async fn handle(
     pool: &PgPool,
-    embedder: Arc<Embedder>,
+    embedder: Arc<LazyEmbedder>,
     query_log_enabled: bool,
     search_cfg: &SearchConfig,
     args: SearchArgs,
