@@ -93,3 +93,10 @@ api = ["dep:reqwest"]
 tokio = { version = "1", features = ["full"] }
 # Temp dirs for test isolation.
 tempfile = "3"
+
+[lints.clippy]
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+indexing_slicing = "warn"
