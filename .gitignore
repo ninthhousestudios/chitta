@@ -13,6 +13,10 @@ bench/astrobench/*.pyc
 bench/astrobench/outputs/
 bench/astrobench/hapax-candidates.txt
 bench/datasets/astrobench/snapshot-*.dump
-.sutra/
+# Ignore sutra workspace state but track governance config
+.sutra/*/
+.sutra/acks/
+!.sutra/rules.toml
+!.sutra/owners.toml
 .codex
 scripts/migrate/
