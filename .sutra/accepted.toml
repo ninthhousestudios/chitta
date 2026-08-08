@@ -1,0 +1,125 @@
+[[waiver]]
+constraint = "no-allow-attributes"
+file = "src/embedding.rs"
+symbol = "Embedder"
+rationale = "Pre-existing #[allow(dead_code)] on staged-but-unwired Embedder API surface, predates governance. Grandfathered at adoption; convert to #[expect(dead_code, reason=...)] during cleanup."
+by = "josh"
+
+[[waiver]]
+constraint = "no-allow-attributes"
+file = "src/main.rs"
+symbol = "serve_http"
+rationale = "Pre-existing #[allow(deprecated)] wrapping intentional legacy interop in serve_http, predates governance. Grandfathered at adoption; prefer #[expect(deprecated, reason=...)] during cleanup."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/embedding.rs"
+symbol = "LazyEmbedder::ensure_loaded"
+rationale = "PathBuf model/tokenizer paths moved into the spawn_blocking closure for lazy model load."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/error.rs"
+symbol = "ChittaError::data"
+rationale = "Building the owned ErrorData wire payload from &self; owned Strings are required at the wire boundary and &self is the correct API shape."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/ingest.rs"
+symbol = "process_item"
+rationale = "idem_key/profile/source owned for DB insert and cross-await reuse in the ingest worker."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/main.rs"
+symbol = "run_backfill"
+rationale = "PgPool Arc clone moved into the backfill spawn task."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/main.rs"
+symbol = "serve_http"
+rationale = "PgPool/CancellationToken are Arc-cheap shared handles; String/config clones cross tokio::spawn task boundaries during HTTP server setup."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/retrieval.rs"
+symbol = "search_hybrid"
+rationale = "p.query_embed.dense is behind a shared &HybridSearchParams borrow; must clone to own the Vector — the &-param API forces it."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/synthesis/contradiction.rs"
+symbol = "parse_contradiction_response"
+rationale = "content owned for the parsed contradiction result struct from a borrowed existing-row slice."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/synthesis/emission.rs"
+symbol = "cluster_idem_key"
+rationale = "source_ids owned to compute the idempotency key from a borrowed cluster."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/synthesis/emission.rs"
+symbol = "embed_and_build"
+rationale = "Owned dense vector required to build the consolidated MemoryRow for DB insert."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/synthesis/emission.rs"
+symbol = "emit_consolidated"
+rationale = "representative_claim/memory_type owned to build the consolidated row from a borrowed cluster."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/synthesis/emission.rs"
+symbol = "emit_with_supersession"
+rationale = "source_facets owned to carry facets into the superseding consolidated row."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/synthesis/mod.rs"
+symbol = "run_synthesis_from"
+rationale = "facets owned for the consolidated row built during synthesis from a borrowed source row."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/tools/record_feedback.rs"
+symbol = "handle"
+rationale = "correction_text owned for the feedback storage row."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/tools/reflect_status.rs"
+symbol = "handle"
+rationale = "memory_type owned for the status output struct from a borrowed row."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/tools/search.rs"
+symbol = "handle"
+rationale = "Owned copies moved into the fire-and-forget query-log tokio::spawn (async boundary). query_vec is the owned Vector for the non-hybrid SearchParams while embed_out stays borrowed for the hybrid path + sparse log — embed_out.dense is genuinely reused (borrowed at query_embed:&embed_out), so it is not a movable clone."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/validators.rs"
+symbol = "validate_decision_metadata"
+rationale = "meta cloned only on the not-an-object error branch to populate the owned ErrorData.received payload."
+by = "josh"

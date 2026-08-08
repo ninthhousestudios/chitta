@@ -1,3 +1,7 @@
+// clone_on_ref_ptr is not enforced in integration tests: the lint exists to
+// disambiguate no-clone-driven-dev in src/, which doesn't apply to tests.
+#![allow(clippy::clone_on_ref_ptr)]
+
 //! L2 integration tests: behavior against a live Postgres + ONNX model.
 //!
 //! **Deviation from plan.** The plan says "spawn the binary and drive stdio

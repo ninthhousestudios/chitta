@@ -65,7 +65,7 @@ impl ChittaServer {
         &self,
         Parameters(args): Parameters<tools::StoreArgs>,
     ) -> Result<String, ErrorData> {
-        let out = tools::store::handle(&self.pool, self.embedder.clone(), args)
+        let out = tools::store::handle(&self.pool, Arc::clone(&self.embedder), args)
             .await
             .map_err(chitta_to_rmcp)?;
         serde_json::to_string_pretty(&out).map_err(json_to_rmcp)
@@ -96,7 +96,7 @@ impl ChittaServer {
     ) -> Result<String, ErrorData> {
         let out = tools::search::handle(
             &self.pool,
-            self.embedder.clone(),
+            Arc::clone(&self.embedder),
             self.query_log_enabled,
             &self.search_cfg,
             args,
@@ -117,7 +117,7 @@ impl ChittaServer {
         &self,
         Parameters(args): Parameters<tools::UpdateArgs>,
     ) -> Result<String, ErrorData> {
-        let out = tools::update::handle(&self.pool, self.embedder.clone(), args)
+        let out = tools::update::handle(&self.pool, Arc::clone(&self.embedder), args)
             .await
             .map_err(chitta_to_rmcp)?;
         serde_json::to_string_pretty(&out).map_err(json_to_rmcp)
@@ -217,7 +217,7 @@ impl ChittaServer {
         &self,
         Parameters(args): Parameters<tools::RecordFeedbackArgs>,
     ) -> Result<String, ErrorData> {
-        let out = tools::record_feedback::handle(&self.pool, self.embedder.clone(), args)
+        let out = tools::record_feedback::handle(&self.pool, Arc::clone(&self.embedder), args)
             .await
             .map_err(chitta_to_rmcp)?;
         serde_json::to_string_pretty(&out).map_err(json_to_rmcp)
@@ -234,7 +234,7 @@ impl ChittaServer {
         &self,
         Parameters(_args): Parameters<tools::HealthArgs>,
     ) -> Result<String, ErrorData> {
-        let out = tools::health::handle(&self.pool, self.embedder.clone(), &self.search_cfg)
+        let out = tools::health::handle(&self.pool, Arc::clone(&self.embedder), &self.search_cfg)
             .await
             .map_err(chitta_to_rmcp)?;
         serde_json::to_string_pretty(&out).map_err(json_to_rmcp)
